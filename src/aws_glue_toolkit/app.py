@@ -19,7 +19,9 @@ from aws_glue_toolkit.artifacts import (
     write_gluewheels_tree,
 )
 from aws_glue_toolkit.dependencies import (
+    GlueImagePinPolicy,
     bundle_wheels,
+    glue_image_pin_policy,
     prepare_requirements,
     resolve_packages,
     staged_requirements,
@@ -42,6 +44,11 @@ __all__ = [
 ]
 
 
+def _pin_policy(job: GlueJobProject) -> GlueImagePinPolicy:
+    """Image pin policy for merged direct job dependencies."""
+    return glue_image_pin_policy(job.runtime, job.dependencies)
+
+
 def _bundle_wheels_for_mode(
     job: GlueJobProject,
     dest: Path,
@@ -50,13 +57,14 @@ def _bundle_wheels_for_mode(
 ) -> dict[str, str]:
     """Prepare deps and run :func:`bundle_wheels` for ``mode``."""
     host = mode == "host"
+    policy = _pin_policy(job)
     return bundle_wheels(
         prepared=prepare_requirements(
             job.dependencies,
             job.project_dir,
             for_container=not host,
         ),
-        runtime=job.runtime,
+        policy=policy,
         dest=dest,
         runner=host_pip_runner() if host else pip_runner(job),
         cross_platform=host,
@@ -84,9 +92,10 @@ def check(
 
     """
     if mode == "container":
+        policy = _pin_policy(job)
         resolve_packages(
             prepared=prepare_requirements(job.dependencies, job.project_dir),
-            runtime=job.runtime,
+            policy=policy,
             runner=pip_runner(job),
         )
         return
@@ -165,7 +174,8 @@ def run(
         return run_job(job, *job_args, platform=docker_platform)
 
     prepared = prepare_requirements(job.dependencies, job.project_dir)
-    with staged_requirements(prepared, job.runtime) as (_work, mounts):
+    policy = _pin_policy(job)
+    with staged_requirements(prepared, policy) as (_work, mounts):
         return run_job(
             job,
             *job_args,
@@ -208,7 +218,8 @@ def test(
         return run_tests(job, *pytest_args, platform=docker_platform)
 
     prepared = prepare_requirements(job.dependencies, job.project_dir)
-    with staged_requirements(prepared, job.runtime) as (_work, mounts):
+    policy = _pin_policy(job)
+    with staged_requirements(prepared, policy) as (_work, mounts):
         return run_tests(
             job,
             *pytest_args,

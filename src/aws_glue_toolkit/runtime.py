@@ -24,7 +24,9 @@ Bundled JSON is validated before release.
 :func:`load_runtime`).
 
 :mod:`aws_glue_toolkit.dependencies` uses ``docker_image`` and
-``python_packages`` (constraints and gluewheels pin omit).
+``python_packages`` (constraints and gluewheels pin omit). A direct job
+dependency that names a ``python_packages`` entry is excluded from pip
+constraints so the job pin can override the image version.
 ``pip_platform`` and ``core_engines.python`` feed host
 ``pip download`` for ``gtk build|check --mode host``.
 ``worker_docker_platform`` feeds Docker for worker-arch containers.

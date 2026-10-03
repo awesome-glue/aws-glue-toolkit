@@ -107,6 +107,17 @@ Writes a dependencies zip (host: `.py` under `source`) and a gluewheels zip.
 
 Path deps must be installable packages (`pyproject.toml` or `setup.py`); loose job modules belong under `source`. Both zips are always written; gluewheels omits packages already pinned on the image at the same version.
 
+#### Overriding image-bundled packages
+
+Glue workers ship many Python libraries at fixed versions (see bundled runtime metadata). By default those versions are pip constraints. To ship a **different** version of a package that is already on the image, add it as a **direct** dependency (in `[project].dependencies` or merged `[tool.aws-glue-toolkit].dependencies`). That name is removed from pip constraints so your spec wins; `check`, `build`, `run`, and `test` all use the same rules. If the resolved version still matches the image pin, the wheel is omitted from gluewheels as usual. Other image pins keep constraining transitives unless you list those packages too.
+
+Example for Glue 5.1 (image ships `pandas==2.3.3`):
+
+```toml
+[project]
+dependencies = ["pandas==2.2.3"]
+```
+
 | File | Glue parameter | Contents |
 | --- | --- | --- |
 | `{name}-{version}.dependencies.zip` | `--extra-py-files` | `.py` files under `source`, except the entry script |

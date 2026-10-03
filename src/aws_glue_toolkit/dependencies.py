@@ -5,7 +5,8 @@ Rewrites ``file:`` PEP 508 specs for container or host paths, runs
 and filters wheels already pinned on the Glue image. Pass a
 :class:`PipRunner` from :mod:`aws_glue_toolkit.docker` to execute pip.
 
-Public API: :class:`PreparedRequirements`, :func:`prepare_requirements`,
+Public API: :class:`GlueImagePinPolicy`, :func:`glue_image_pin_policy`,
+:class:`PreparedRequirements`, :func:`prepare_requirements`,
 :func:`staged_requirements`, :func:`pip_install_target_args`,
 :func:`resolve_packages`, :func:`bundle_wheels`, :class:`PipRunner`,
 :exc:`PipError`, :exc:`RequirementPreparationError`.
@@ -22,7 +23,7 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlparse
 
-from packaging.requirements import Requirement
+from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name, parse_wheel_filename
 
 from aws_glue_toolkit.paths import (
@@ -41,11 +42,13 @@ if TYPE_CHECKING:
 PipRunner = Callable[[Sequence[str], Sequence[tuple[Path, str]]], None]
 
 __all__ = [
+    "GlueImagePinPolicy",
     "PipError",
     "PipRunner",
     "PreparedRequirements",
     "RequirementPreparationError",
     "bundle_wheels",
+    "glue_image_pin_policy",
     "pip_error_from_returncode",
     "pip_install_target_args",
     "prepare_requirements",
@@ -297,6 +300,72 @@ def _mount_point_for(
     return container_path
 
 
+# --- Glue image pin policy ---
+
+
+@dataclass(frozen=True, slots=True)
+class GlueImagePinPolicy:
+    """Pip constraints and gluewheels omit rules for a job resolve."""
+
+    runtime: GlueRuntimeMetadata
+    constraint_pins: Mapping[str, str]
+    omit_pins: Mapping[str, str]
+
+
+def _direct_dependency_names(specs: Sequence[str]) -> frozenset[str]:
+    """Return canonical names from direct PEP 508 requirement strings."""
+    names: set[str] = set()
+    for spec in specs:
+        stripped = spec.strip()
+        if not stripped:
+            continue
+        try:
+            names.add(canonicalize_name(Requirement(stripped).name))
+        except InvalidRequirement as err:
+            msg = f"invalid dependency spec: {stripped!r}"
+            raise RequirementPreparationError(msg) from err
+    return frozenset(names)
+
+
+def glue_image_pin_policy(
+    runtime: GlueRuntimeMetadata,
+    direct_specs: Sequence[str],
+) -> GlueImagePinPolicy:
+    """Build constraint and omit pins for check, build, run, and test.
+
+    Direct dependencies that name a Glue image package are excluded from
+    pip ``--constraint`` so the job spec wins; omit still uses full image
+    pins (wheels matching the image version are dropped from gluewheels).
+
+    Args:
+        runtime: Glue runtime metadata (``python_packages`` catalog).
+        direct_specs: Merged ``[project].dependencies`` and tool-section
+            deps (PEP 508 strings).
+
+    Returns:
+        :class:`GlueImagePinPolicy` for pip workspaces and wheel omit.
+
+    """
+    image_pins = runtime.python_packages
+    image_by_canonical = {canonicalize_name(name): name for name in image_pins}
+    direct_names = _direct_dependency_names(direct_specs)
+    overridden = frozenset(
+        canonical
+        for canonical in direct_names
+        if canonical in image_by_canonical
+    )
+    constraint_pins = {
+        name: version
+        for name, version in image_pins.items()
+        if canonicalize_name(name) not in overridden
+    }
+    return GlueImagePinPolicy(
+        runtime=runtime,
+        constraint_pins=constraint_pins,
+        omit_pins=image_pins,
+    )
+
+
 # --- pip workspace ---
 
 
@@ -345,13 +414,13 @@ def _volume_mounts_for(
 @contextmanager
 def staged_requirements(
     prepared: PreparedRequirements,
-    runtime: GlueRuntimeMetadata,
+    policy: GlueImagePinPolicy,
 ) -> Iterator[tuple[Path, Sequence[tuple[Path, str]]]]:
     """Stage requirements files and yield pip work dir plus volume mounts.
 
     Args:
         prepared: Dependency specs rewritten for container pip.
-        runtime: Glue runtime metadata (image pins used as constraints).
+        policy: Image pin policy (``constraint_pins`` for ``constraints.txt``).
 
     Yields:
         ``(work, mounts)`` where ``work`` holds ``requirements.in`` and
@@ -361,7 +430,7 @@ def staged_requirements(
     """
     with _pip_workspace(
         prepared.rewritten_specs,
-        runtime.python_packages,
+        policy.constraint_pins,
     ) as work:
         yield work, _volume_mounts_for(work, prepared)
 
@@ -382,7 +451,7 @@ def pip_install_target_args() -> list[str]:
 
 def resolve_packages(
     prepared: PreparedRequirements,
-    runtime: GlueRuntimeMetadata,
+    policy: GlueImagePinPolicy,
     *,
     runner: PipRunner,
 ) -> dict[str, str]:
@@ -390,7 +459,7 @@ def resolve_packages(
 
     Args:
         prepared: Dependency specs rewritten for the chosen pip runner.
-        runtime: Glue runtime metadata (image pins used as constraints).
+        policy: Image pin policy (``constraint_pins`` for ``constraints.txt``).
         runner: :class:`PipRunner` (host or container).
 
     Returns:
@@ -402,7 +471,7 @@ def resolve_packages(
     """
     with _pip_workspace(
         prepared.rewritten_specs,
-        runtime.python_packages,
+        policy.constraint_pins,
     ) as work:
         return _dry_run_install_report(work, prepared, runner=runner)
 
@@ -577,15 +646,16 @@ def _ensure_pin_wheel(
 
 def _bundle_cross_platform(
     prepared: PreparedRequirements,
-    runtime: GlueRuntimeMetadata,
+    policy: GlueImagePinPolicy,
     dest: Path,
     *,
     runner: PipRunner,
 ) -> None:
     """Wheel path/VCS deps, then ensure a portable wheel per resolved pin."""
+    runtime = policy.runtime
     with _pip_workspace(
         prepared.rewritten_specs,
-        runtime.python_packages,
+        policy.constraint_pins,
     ) as work:
         mounts = _volume_mounts_for(
             work,
@@ -613,7 +683,7 @@ def _bundle_cross_platform(
 
 def _bundle_in_container(
     prepared: PreparedRequirements,
-    runtime: GlueRuntimeMetadata,
+    policy: GlueImagePinPolicy,
     dest: Path,
     *,
     runner: PipRunner,
@@ -621,7 +691,7 @@ def _bundle_in_container(
     """Build all wheels with ``pip wheel`` in the Glue container."""
     with _pip_workspace(
         prepared.rewritten_specs,
-        runtime.python_packages,
+        policy.constraint_pins,
     ) as work:
         runner(
             [
@@ -659,7 +729,7 @@ def _omit_pinned_wheels(
 
 def bundle_wheels(
     prepared: PreparedRequirements,
-    runtime: GlueRuntimeMetadata,
+    policy: GlueImagePinPolicy,
     dest: Path,
     *,
     runner: PipRunner,
@@ -669,8 +739,8 @@ def bundle_wheels(
 
     Args:
         prepared: Dependency specs rewritten for container or host pip.
-        runtime: Glue runtime metadata (constraints; ``pip_platform`` /
-            Python version when ``cross_platform``).
+        policy: Image pin policy (constraints, omit pins, and runtime for
+            host ``pip download --platform``).
         dest: Existing wheel output directory from
             :func:`~aws_glue_toolkit.artifacts.stage_gluewheels_zip`.
         runner: Callable that runs pip (container or host).
@@ -687,7 +757,7 @@ def bundle_wheels(
 
     """
     if cross_platform:
-        _bundle_cross_platform(prepared, runtime, dest, runner=runner)
+        _bundle_cross_platform(prepared, policy, dest, runner=runner)
     else:
-        _bundle_in_container(prepared, runtime, dest, runner=runner)
-    return _omit_pinned_wheels(dest, runtime.python_packages)
+        _bundle_in_container(prepared, policy, dest, runner=runner)
+    return _omit_pinned_wheels(dest, policy.omit_pins)

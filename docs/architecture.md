@@ -12,7 +12,7 @@ Domain facts, rules, and transforms. No CLI, Docker subprocesses, or terminal I/
 | `paths.py` | Container mount constants; host→container path mapping |
 | `runtime.py` | Bundled Glue version JSON → `GlueRuntimeMetadata` |
 | `job.py` | `pyproject.toml` validation → `GlueJobProject` (merges `project.dependencies` then `tool.aws-glue-toolkit.dependencies`) |
-| `dependencies.py` | PEP 508 prep; pip dry-run, `pip wheel` / `pip download`, image-pin filtering; staged install for run/test; `PipRunner` injection |
+| `dependencies.py` | PEP 508 prep; `glue_image_pin_policy` (shared constraints + omit); pip dry-run, `pip wheel` / `pip download`, image-pin filtering; staged install for run/test; `PipRunner` injection |
 | `artifacts.py` | Zip layout for `.dependencies.zip` and gluewheels tree staging |
 
 Core modules must not import `docker`, `cli`, or `app`. Allowed sibling
@@ -79,6 +79,8 @@ flowchart TB
 - **`--mode host` (default):** `app.check` → `_bundle_wheels_for_mode` / `bundle_wheels` (`cross_platform`, `host_pip_runner`) into a temp dir (discarded; same recipe as host build gluewheels).
 - **`--mode container`:** `app.check` → `resolve_packages` → `pip_runner` / Glue image dry-run.
 
+All four commands use the same `glue_image_pin_policy(job.runtime, job.dependencies)`: pip `--constraint` omits image pins for direct overrides; gluewheels omit still compares against the full image catalog.
+
 ### `gtk build`
 
 1. `artifacts.build_dependencies_zip` (host)
@@ -129,7 +131,7 @@ Library callers typically import:
 
 - `from aws_glue_toolkit.job import load_pyproject, GlueJobProject`
 - `from aws_glue_toolkit.runtime import load_runtime`
-- `from aws_glue_toolkit.dependencies import prepare_requirements`
+- `from aws_glue_toolkit.dependencies import glue_image_pin_policy, prepare_requirements`
 - `from aws_glue_toolkit.artifacts import build_dependencies_zip`
 - `from aws_glue_toolkit.app import check, build, run, test`
 
