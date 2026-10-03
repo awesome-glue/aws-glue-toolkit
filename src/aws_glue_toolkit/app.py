@@ -1,16 +1,14 @@
-"""Application orchestration for ``gtk`` check, build, run, and test.
+"""Application orchestration for ``gtk`` build, run, and test.
 
 Wires :mod:`aws_glue_toolkit.dependencies` to
-:mod:`aws_glue_toolkit.docker` (host pip for ``build|check --mode host``,
-container pip for ``build|check --mode container``, ``run``, and
-``test``). No Rich panels, Cyclopts, or exit codes — callers
-in :mod:`aws_glue_toolkit.cli` map exceptions to user-facing output.
+:mod:`aws_glue_toolkit.docker` (host pip for ``build --mode host``,
+container pip for ``build --mode container``, ``run``, and ``test``).
+No Rich panels, Cyclopts, or exit codes — callers in
+:mod:`aws_glue_toolkit.cli` map exceptions to user-facing output.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Literal
 
 from aws_glue_toolkit.artifacts import (
@@ -23,7 +21,6 @@ from aws_glue_toolkit.dependencies import (
     bundle_wheels,
     glue_image_pin_policy,
     prepare_requirements,
-    resolve_packages,
     staged_requirements,
 )
 from aws_glue_toolkit.docker import (
@@ -34,11 +31,12 @@ from aws_glue_toolkit.docker import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from aws_glue_toolkit.job import GlueJobProject
 
 __all__ = [
     "build",
-    "check",
     "run",
     "test",
 ]
@@ -69,38 +67,6 @@ def _bundle_wheels_for_mode(
         runner=host_pip_runner() if host else pip_runner(job),
         cross_platform=host,
     )
-
-
-def check(
-    job: GlueJobProject,
-    *,
-    mode: Literal["host", "container"],
-) -> None:
-    """Verify job dependencies against Glue runtime pins.
-
-    Args:
-        job: Resolved job config from
-            :func:`~aws_glue_toolkit.job.load_pyproject`.
-        mode: ``"host"`` — same gluewheels recipe as ``build --mode host``
-            (temp dir, discarded); ``"container"`` — dry-run in the Glue
-            image.
-
-    Raises:
-        PipError: Unsatisfiable requirements or non-portable host wheels.
-        RequirementPreparationError: A dependency spec could not be prepared.
-        DockerError: Docker unavailable when ``mode`` is ``"container"``.
-
-    """
-    if mode == "container":
-        policy = _pin_policy(job)
-        resolve_packages(
-            prepared=prepare_requirements(job.dependencies, job.project_dir),
-            policy=policy,
-            runner=pip_runner(job),
-        )
-        return
-    with TemporaryDirectory() as tmp:
-        _bundle_wheels_for_mode(job, Path(tmp), mode="host")
 
 
 def build(

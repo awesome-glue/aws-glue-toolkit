@@ -1,21 +1,19 @@
-"""``gtk`` — CLI for Glue job dependency check and wheel packaging.
+"""``gtk`` — CLI for Glue job wheel packaging and local runs.
 
 Commands:
 
-- ``check`` / ``build`` — ``--mode host`` (default) or ``container``
+- ``build`` — ``--mode host`` (default) or ``container``
 - ``run`` / ``test`` — ``--platform native`` (default) or ``worker``
 
-``build|check --mode`` chooses where pip runs: ``host`` (default) local
-pip for worker-oriented resolve/packaging (no Docker); ``container``
-worker-arch Glue/build container (may need QEMU on ARM).
+``build --mode`` chooses where pip runs: ``host`` (default) local pip for
+worker-oriented resolve and packaging (no Docker); ``container`` worker-arch
+Glue build container (may need QEMU on ARM).
 ``run|test --platform`` chooses which Glue image arch to run: ``native``
 (default) matches your machine; ``worker`` matches Glue job workers
 (may need QEMU on ARM).
 
 Example::
 
-    gtk check ./my-glue-job
-    gtk check ./my-glue-job --mode container
     gtk build ./my-glue-job
     gtk build ./my-glue-job --mode container
     gtk run ./my-glue-job
@@ -40,7 +38,6 @@ from pydantic.types import (
 from rich.panel import Panel
 
 from aws_glue_toolkit.app import build as build_job
-from aws_glue_toolkit.app import check as check_job
 from aws_glue_toolkit.app import run as run_job
 from aws_glue_toolkit.app import test as test_job
 from aws_glue_toolkit.dependencies import PipError, RequirementPreparationError
@@ -62,7 +59,7 @@ T = TypeVar("T")
 app = App(
     help=(
         "AWS Glue development lifecycle toolkit. "
-        "build|check --mode chooses where pip runs (host|container); "
+        "build --mode chooses where pip runs (host|container); "
         "run|test --platform chooses Glue image arch (native|worker)."
     ),
     result_action="print_non_int_sys_exit",
@@ -236,53 +233,6 @@ def _run_or_test(  # noqa: PLR0915  # pylint: disable=too-many-statements
 
 
 # --- Commands ---
-
-
-@app.command
-def check(
-    job_dir: DirectoryPath = Path(),
-    mode: Annotated[
-        Literal["host", "container"],
-        Parameter(
-            name="--mode",
-            help=(
-                "host (default; no Docker) or container dry-run "
-                "(worker-arch; needs Docker)."
-            ),
-        ),
-    ] = "host",
-) -> Panel | int:
-    """Verify dependencies against Glue runtime pins.
-
-    ``--mode host`` (default): same gluewheels recipe as ``build --mode
-    host`` (temp dir, discarded). ``--mode container``: dry-run in the Glue
-    image. Does not write zip artifacts.
-
-    """
-    try:
-        job = _load_job_project(job_dir)
-        worker_platform = (
-            job.runtime.worker_docker_platform if mode == "container" else None
-        )
-        try:
-            _handle_dependency_errors(
-                lambda: check_job(job, mode=mode),
-                worker_platform=worker_platform,
-            )
-        except PipError:
-            raise GtkCommandError(
-                GtkExitCode.DATAERR,
-                "Conflicts detected",
-                "Requirements are unsatisfiable with bundled Glue pins.",
-            ) from None
-        return Panel(
-            "Dependencies resolve against Glue runtime pins.",
-            title="[bold green]No conflicts[/]",
-            border_style="green",
-        )
-    except GtkCommandError as err:
-        _print_command_error(err)
-        return int(err.exit_code)
 
 
 @app.command

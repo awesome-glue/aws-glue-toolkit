@@ -8,8 +8,6 @@ A streamlined command-line utility designed to simplify the AWS Glue development
 
 Requires Python 3.11+ and [Docker](https://docs.docker.com/get-docker/) for `run`, `test`, and `gtk build --mode container` (never installed by `gtk`). Default `gtk build` (`--mode host`) needs no Docker. Installing the package adds the `gtk` command and a compatible `pip` release.
 
-> **Note:** User-facing docs describe three commands (`build`, `run`, `test`). An installed build may still expose deprecated commands until the next release removes them.
-
 ```bash
 pip install aws-glue-toolkit
 ```

@@ -8,9 +8,9 @@ Each supported Glue version has a JSON file shipped in the wheel at
 - ``core_engines`` — Spark, Python, and Scala versions on the worker image
 - ``table_formats`` — Hudi, Iceberg, and Delta Lake library versions
 - ``pip_platform`` — ``pip --platform`` tag for manylinux wheels (used by
-  ``gtk build|check --mode host``)
+  ``gtk build --mode host``)
 - ``worker_docker_platform`` — Docker ``--platform`` for Glue job workers
-  (container build/check; ``gtk run|test --platform worker``)
+  (``gtk build --mode container``; ``gtk run|test --platform worker``)
 - ``python_packages`` — preinstalled package name → version pins
 - ``docker_image`` — official AWS Glue local Docker image for this release
 
@@ -28,7 +28,7 @@ Bundled JSON is validated before release.
 dependency that names a ``python_packages`` entry is excluded from pip
 constraints so the job pin can override the image version.
 ``pip_platform`` and ``core_engines.python`` feed host
-``pip download`` for ``gtk build|check --mode host``.
+``pip download`` for ``gtk build --mode host``.
 ``worker_docker_platform`` feeds Docker for worker-arch containers.
 ``table_formats`` is loaded for callers but unused by ``gtk`` itself.
 
@@ -106,7 +106,7 @@ class GlueRuntimeMetadata:
         core_engines: Spark, Python, and Scala versions.
         table_formats: Hudi, Iceberg, and Delta Lake versions.
         pip_platform: ``pip --platform`` tag for Glue workers
-            (``build|check --mode host``).
+            (``build --mode host``).
         worker_docker_platform: Docker ``--platform`` for Glue job workers.
         python_packages: Preinstalled package name → version.
         docker_image: Official AWS Glue local Docker image for this release.

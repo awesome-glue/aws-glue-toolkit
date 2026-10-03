@@ -8,7 +8,7 @@ and filters wheels already pinned on the Glue image. Pass a
 Public API: :class:`GlueImagePinPolicy`, :func:`glue_image_pin_policy`,
 :class:`PreparedRequirements`, :func:`prepare_requirements`,
 :func:`staged_requirements`, :func:`pip_install_target_args`,
-:func:`resolve_packages`, :func:`bundle_wheels`, :class:`PipRunner`,
+:func:`bundle_wheels`, :class:`PipRunner`,
 :exc:`PipError`, :exc:`RequirementPreparationError`.
 """
 
@@ -52,7 +52,6 @@ __all__ = [
     "pip_error_from_returncode",
     "pip_install_target_args",
     "prepare_requirements",
-    "resolve_packages",
     "staged_requirements",
 ]
 
@@ -331,7 +330,7 @@ def glue_image_pin_policy(
     runtime: GlueRuntimeMetadata,
     direct_specs: Sequence[str],
 ) -> GlueImagePinPolicy:
-    """Build constraint and omit pins for check, build, run, and test.
+    """Build constraint and omit pins for build, run, and test.
 
     Direct dependencies that name a Glue image package are excluded from
     pip ``--constraint`` so the job spec wins; omit still uses full image
@@ -447,33 +446,6 @@ def pip_install_target_args() -> list[str]:
         f"{PIP_WORK_MOUNT}/constraints.txt",
         "--quiet",
     ]
-
-
-def resolve_packages(
-    prepared: PreparedRequirements,
-    policy: GlueImagePinPolicy,
-    *,
-    runner: PipRunner,
-) -> dict[str, str]:
-    """Run ``pip install --dry-run --report`` and return resolved packages.
-
-    Args:
-        prepared: Dependency specs rewritten for the chosen pip runner.
-        policy: Image pin policy (``constraint_pins`` for ``constraints.txt``).
-        runner: :class:`PipRunner` (host or container).
-
-    Returns:
-        Resolved package name → version for the dry-run install plan.
-
-    Raises:
-        PipError: ``pip`` exited non-zero during the dry run.
-
-    """
-    with _pip_workspace(
-        prepared.rewritten_specs,
-        policy.constraint_pins,
-    ) as work:
-        return _dry_run_install_report(work, prepared, runner=runner)
 
 
 def _dry_run_install_report(
