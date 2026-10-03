@@ -1,12 +1,14 @@
 # AWS Glue Toolkit
 
-A streamlined CLI utility designed to simplify the AWS Glue development lifecycle.
+A streamlined command-line utility designed to simplify the AWS Glue development lifecycle.
 
 > **Disclaimer:** This is an independent, community-maintained project. It is **not** affiliated with, endorsed by, or sponsored by Amazon Web Services (AWS). AWS, AWS Glue, and related marks are trademarks of Amazon.com, Inc. or its affiliates.
 
 ## Installation
 
-Requires Python 3.11+ and [Docker](https://docs.docker.com/get-docker/) for `run`, `test`, and `--mode container` on `check`/`build` (never installed by `gtk`). Default `gtk check` / `gtk build` (`--mode host`) need no Docker. Installing the package adds the `gtk` command and a compatible `pip` release.
+Requires Python 3.11+ and [Docker](https://docs.docker.com/get-docker/) for `run`, `test`, and `gtk build --mode container` (never installed by `gtk`). Default `gtk build` (`--mode host`) needs no Docker. Installing the package adds the `gtk` command and a compatible `pip` release.
+
+> **Note:** User-facing docs describe three commands (`build`, `run`, `test`). An installed build may still expose deprecated commands until the next release removes them.
 
 ```bash
 pip install aws-glue-toolkit
@@ -44,11 +46,12 @@ then run:
 
 ```bash
 cd my-glue-job
-gtk check .
 gtk build .
 gtk run .
 gtk test .
 ```
+
+Use `gtk build` to verify dependencies resolve against Glue runtime pins (host mode needs no Docker; use `--mode container` in continuous integration to match worker-arch pip).
 
 ## Configuration
 
@@ -67,49 +70,42 @@ Each job is a directory containing `pyproject.toml`. Unknown keys are ignored. T
 
 ### Pip configuration
 
-For container pip (`check`/`build --mode container`, and dep install on `run`/`test`), `gtk` snapshots the host’s effective [pip configuration](https://pip.pypa.io/en/stable/topics/configuration/) (files + `PIP_*`, env wins) into a temporary `pip.conf`, mounts it, and sets `PIP_CONFIG_FILE`. Host-local keys (`cache-dir`, `cert`, `target`, and similar) are omitted. Default `--mode host` uses host pip config as-is.
+For container pip (`build --mode container`, and dependency install on `run`/`test`), `gtk` snapshots the host’s effective [pip configuration](https://pip.pypa.io/en/stable/topics/configuration/) (files + `PIP_*`, env wins) into a temporary `pip.conf`, mounts it, and sets `PIP_CONFIG_FILE`. Host-local keys (`cache-dir`, `cert`, `target`, and similar) are omitted. Default `--mode host` uses host pip configuration as-is.
 
 ```bash
 # ~/.config/pip/pip.conf  or:
 export PIP_EXTRA_INDEX_URL="https://my.company/simple"
-gtk check .
+gtk build .
 ```
 
 ## Commands
 
-`[JOB-DIR]` is the job directory path (positional or `--job-dir`; default `.`). Docker is required for `run`, `test`, and `--mode container` (Glue image pulled on first use). Default `--mode host` does not. `gtk` never installs Docker.
+`[JOB-DIR]` is the job directory path (positional or `--job-dir`; default `.`). Docker is required for `run`, `test`, and `--mode container` on `build` (Glue image pulled on first use). Default `--mode host` does not. `gtk` never installs Docker.
 
-**`build|check --mode`** chooses *where pip runs*: **`host`** (default) local pip for worker-oriented resolve/packaging (no Docker); **`container`** worker-arch Glue/build container (may need QEMU on ARM).  
-**`run|test --platform`** chooses *which Glue image arch to run*: **`native`** (default) matches your machine; **`worker`** matches Glue job workers (may need QEMU on ARM).
+**Packaging — `build --mode`** chooses *where pip builds wheels*: **`host`** (default) local pip for worker-oriented resolve and packaging (no Docker); **`container`** worker-arch Glue build container (may need QEMU on ARM).
+
+**Runtime image — `run|test --platform`** chooses *which Glue container processor architecture to use*: **`native`** (default) matches your machine; **`worker`** matches Glue job workers (may need QEMU on ARM).
 
 | Command | Usage |
 | --- | --- |
-| check | `gtk check [JOB-DIR] [--mode host\|container]` |
 | build | `gtk build [JOB-DIR] [--mode host\|container]` |
 | run | `gtk run [JOB-DIR] [--platform native\|worker] [args...]` |
 | test | `gtk test [JOB-DIR] [--platform native\|worker] [pytest args...]` |
 
-For `run` / `test`: job dir mounted at `/home/hadoop/workspace`; non-empty job dependencies install into an ephemeral `PYTHONPATH` target (Glue pins as constraints); stdio pass through; exit code is the container command’s (or pip’s if install fails). Same dependency forms as `check` / `build`.
-
-### check
-
-Verifies job dependencies against Glue runtime pins. Does not write zip artifacts.
-
-- **`--mode host` (default):** same gluewheels recipe as `build --mode host` (temp dir, discarded). No Docker.
-- **`--mode container`:** `pip install --dry-run` in the Glue image (worker-arch; QEMU on ARM).
+For `run` / `test`: job dir mounted at `/home/hadoop/workspace`; non-empty job dependencies install into an ephemeral `PYTHONPATH` target (Glue pins as constraints); stdio pass through; exit code is the container command’s (or pip’s if install fails). Same dependency forms as `build`.
 
 ### build
 
-Writes a dependencies zip (host: `.py` under `source`) and a gluewheels zip.
+Writes a dependencies zip (host: `.py` under `source`) and a gluewheels zip. Running `build` is also how you verify dependencies against Glue pins before deployment.
 
 - **`--mode host` (default):** host packaging (no Docker). Path/VCS via `pip wheel --no-deps`; other packages via `pip download --platform --only-binary=:all:`, or sdist→wheel on the host when no compatible wheel exists. Wheels must be `any` or the Glue `pip_platform` (use `--mode container` for compiled packages that need a worker-arch build). VCS needs network and `git` on the host.
-- **`--mode container`:** `pip wheel` in the Glue image (worker-arch). On ARM hosts this needs QEMU (or similar) unless you use `--mode host` for portable wheels.
+- **`--mode container`:** `pip wheel` in the Glue image (worker-arch). On ARM hosts this needs QEMU (or similar) unless you use `--mode host` for portable wheels. Use this mode in continuous integration when you want the same pip environment as worker-arch packaging.
 
 Path deps must be installable packages (`pyproject.toml` or `setup.py`); loose job modules belong under `source`. Both zips are always written; gluewheels omits packages already pinned on the image at the same version.
 
 #### Overriding image-bundled packages
 
-Glue workers ship many Python libraries at fixed versions (see bundled runtime metadata). By default those versions are pip constraints. To ship a **different** version of a package that is already on the image, add it as a **direct** dependency (in `[project].dependencies` or merged `[tool.aws-glue-toolkit].dependencies`). That name is removed from pip constraints so your spec wins; `check`, `build`, `run`, and `test` all use the same rules. If the resolved version still matches the image pin, the wheel is omitted from gluewheels as usual. Other image pins keep constraining transitives unless you list those packages too.
+Glue workers ship many Python libraries at fixed versions (see bundled runtime metadata). By default those versions are pip constraints. To ship a **different** version of a package that is already on the image, add it as a **direct** dependency (in `[project].dependencies` or merged `[tool.aws-glue-toolkit].dependencies`). That name is removed from pip constraints so your spec wins; `build`, `run`, and `test` all use the same rules. If the resolved version still matches the image pin, the wheel is omitted from gluewheels as usual. Other image pins keep constraining transitives unless you list those packages too.
 
 Example for Glue 5.1 (image ships `pandas==2.3.3`):
 
@@ -169,15 +165,21 @@ Same `--platform native|worker` as `run`. Prefer `--platform worker` (or amd64 C
 
 ### Exit codes
 
+Documented failures use Berkeley `sysexits`-style codes in the 64–78 band. **`build`** never passthroughs another program’s exit code. **`run`** and **`test`** return the job or pytest exit code when the container reaches the main command.
+
 | Code | Meaning |
 | --- | --- |
-| 65 | Dependencies unsatisfiable with Glue runtime pins |
+| 65 | Pip or dependency resolution failure (`build`, `run`, or `test`) |
 | 66 | `pyproject.toml` missing or unreadable |
 | 69 | Docker not available or could not be started |
-| 70 | Build pipeline failed |
+| 70 | **`build` only:** zip or other non-pip packaging failure (not pip) |
 | 78 | Invalid `pyproject.toml`, job layout, unsupported Glue version, or invalid dependency |
 
-Success is `0`; unhandled errors are `1`. For `run` / `test`, a successful Docker launch returns the container command’s exit code (not limited to the table above).
+Success is `0`; unhandled errors are `1`. For `run` / `test`, a successful Docker launch returns the container command’s exit code (for example pytest `1` means tests failed, not invalid configuration).
+
+### Stability
+
+The stable interface is the **`gtk` command-line interface**: command names, flags, and the exit codes in the table above. Python module imports are implementation details; this project does not promise semantic versioning on library imports unless README states otherwise explicitly.
 
 ## Architecture
 

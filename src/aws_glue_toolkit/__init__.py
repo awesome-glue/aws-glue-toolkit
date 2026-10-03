@@ -1,11 +1,15 @@
 """AWS Glue Toolkit — simplify the AWS Glue development lifecycle.
 
+The stable interface is the ``gtk`` command-line interface (``build``, ``run``,
+``test``). Python module imports are not semver-promised unless README states
+otherwise.
+
 Modules:
 
-- :mod:`aws_glue_toolkit.app` — ``gtk`` check, build, run, and test
-  orchestration
+- :mod:`aws_glue_toolkit.app` — ``gtk`` build, run, and test orchestration
 - :mod:`aws_glue_toolkit.artifacts` — Glue job zip artifact formats
-- :mod:`aws_glue_toolkit.cli` — ``gtk`` CLI (`check`, `build`, `run`, `test`)
+- :mod:`aws_glue_toolkit.cli` — ``gtk`` command-line entry (``build``, ``run``,
+  ``test``)
 - :mod:`aws_glue_toolkit.dependencies` — dependency prep and pip resolution
 - :mod:`aws_glue_toolkit.docker` — Glue container subprocesses and
   :func:`~aws_glue_toolkit.docker.host_pip_runner`

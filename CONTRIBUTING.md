@@ -34,6 +34,10 @@ Before changing code, read [docs/architecture.md](docs/architecture.md). The pac
 
 Put new business rules and transforms in core modules. Keep subprocess calls, exit-code mapping, and Rich output in the shell layer.
 
+### Stable interface
+
+Only the **`gtk` command-line interface** is stability-guaranteed: command names, flags, and documented exit codes in [README.md](README.md#exit-codes). Python imports under `aws_glue_toolkit` are not semver-promised unless README says otherwise.
+
 ## Making changes
 
 1. Edit code under `src/aws_glue_toolkit/`.

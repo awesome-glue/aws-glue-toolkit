@@ -12,7 +12,7 @@ Domain facts, rules, and transforms. No CLI, Docker subprocesses, or terminal I/
 | `paths.py` | Container mount constants; host→container path mapping |
 | `runtime.py` | Bundled Glue version JSON → `GlueRuntimeMetadata` |
 | `job.py` | `pyproject.toml` validation → `GlueJobProject` (merges `project.dependencies` then `tool.aws-glue-toolkit.dependencies`) |
-| `dependencies.py` | PEP 508 prep; `glue_image_pin_policy` (shared constraints + omit); pip dry-run, `pip wheel` / `pip download`, image-pin filtering; staged install for run/test; `PipRunner` injection |
+| `dependencies.py` | PEP 508 prep; `glue_image_pin_policy` (shared constraints + omit); pip dry-run (internal to wheel bundling), `pip wheel` / `pip download`, image-pin filtering; staged install for run/test; `PipRunner` injection |
 | `artifacts.py` | Zip layout for `.dependencies.zip` and gluewheels tree staging |
 
 Core modules must not import `docker`, `cli`, or `app`. Allowed sibling
@@ -26,7 +26,7 @@ Process boundaries and use-case orchestration:
 | --- | --- | --- |
 | **Infra** | `docker.py` | `docker run` argv builders, `run_job`, `run_tests`, `run_pip_in_container`, `pip_runner`, `host_pip_runner`; host pip config snapshot → mounted `pip.conf` |
 | **Infra** | `run_wrapper.py` | `spark-submit` entry for `gtk run`; clean container exit after the job |
-| **Application** | `app.py` | `check`, `build`, `run`, `test`; wires `dependencies` to host or container pip runners |
+| **Application** | `app.py` | `build`, `run`, `test`; wires `dependencies` to host or container pip runners |
 | **Presentation** | `cli.py` | `gtk` entry point, `GtkCommandError`, exit codes, Rich panels |
 
 `app` raises domain exceptions (`PipError`, `DockerError`, `ValueError`,
@@ -74,20 +74,17 @@ flowchart TB
 
 ## Command flows
 
-### `gtk check`
-
-- **`--mode host` (default):** `app.check` → `_bundle_wheels_for_mode` / `bundle_wheels` (`cross_platform`, `host_pip_runner`) into a temp dir (discarded; same recipe as host build gluewheels).
-- **`--mode container`:** `app.check` → `resolve_packages` → `pip_runner` / Glue image dry-run.
-
-All four commands use the same `glue_image_pin_policy(job.runtime, job.dependencies)`: pip `--constraint` omits image pins for direct overrides; gluewheels omit still compares against the full image catalog.
+**build**, **run**, and **test** share `glue_image_pin_policy(job.runtime, job.dependencies)`: pip `--constraint` omits image pins for direct overrides; gluewheels omit still compares against the full image catalog.
 
 ### `gtk build`
 
 1. `artifacts.build_dependencies_zip` (host)
 2. `app.build` → `_bundle_wheels_for_mode` / `bundle_wheels` → `write_gluewheels_tree` → zip
 
-Host: path/VCS `pip wheel --no-deps` → resolve → per pin `pip download --only-binary` or sdist→wheel → portable assert; omit image pins.  
+Host: path/VCS `pip wheel --no-deps` → dry-run resolve → per pin `pip download --only-binary` or sdist→wheel → portable assert; omit image pins.  
 Container: `pip wheel` in Docker; omit image pins.
+
+Use **`gtk build`** to verify dependencies (same pip recipes as packaging; writes zips on success).
 
 ### `gtk run` / `gtk test`
 
@@ -102,12 +99,16 @@ container).
 - **`--platform worker`:** pass
   ``runtime.worker_docker_platform`` (no fallback to native).
 
-Container ``pip_runner`` (``build|check --mode container``) always uses
+Container ``pip_runner`` (``build --mode container``) always uses
 ``worker_docker_platform``.
 
 For `gtk run`, `docker.run_job` mounts `run_wrapper.py` as the
 `spark-submit` entry so the container returns after the job script
 finishes.
+
+### Planned refactors
+
+Later phases ([redesign-phases/phase-3-dependency-session.md](redesign-phases/phase-3-dependency-session.md), [phase-4-run-in-glue-container.md](redesign-phases/phase-4-run-in-glue-container.md)) introduce **`DependencySession`** / **`open_dependency_session`** and **`run_in_glue_container`** to reduce duplicated pip and Docker wiring. Behavior stays the same until those land.
 
 ## Git and VCS dependencies
 
@@ -127,12 +128,12 @@ If a change needs both pip and Docker for a user-facing workflow, wire it in
 
 ## Public API
 
-Library callers typically import:
+Library callers may import Python modules, but only the **`gtk` command-line interface** is stability-guaranteed (see [README.md](../README.md#stability)). Typical imports today:
 
 - `from aws_glue_toolkit.job import load_pyproject, GlueJobProject`
 - `from aws_glue_toolkit.runtime import load_runtime`
 - `from aws_glue_toolkit.dependencies import glue_image_pin_policy, prepare_requirements`
 - `from aws_glue_toolkit.artifacts import build_dependencies_zip`
-- `from aws_glue_toolkit.app import check, build, run, test`
+- `from aws_glue_toolkit.app import build, run, test`
 
 The `gtk` CLI is registered at `aws_glue_toolkit.cli:app`.
