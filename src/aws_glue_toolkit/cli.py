@@ -74,12 +74,15 @@ class GtkExitCode(IntEnum):
     Values follow BSD ``sysexits.h`` (64-78): ``0`` is success (returned
     implicitly via a success :class:`~rich.panel.Panel`), ``1`` is reserved for
     unhandled failures. Each member pairs with :exc:`GtkCommandError`.
+
+    ``SOFTWARE`` (70) is for non-pip packaging failures on ``build`` only (for
+    example zip I/O). Pip failures use ``DATAERR`` (65) on all commands.
     """
 
-    DATAERR = 65  # unsatisfiable requirements
+    DATAERR = 65  # pip or dependency failure (build, run, test)
     NOINPUT = 66  # cannot read pyproject.toml
     UNAVAILABLE = 69  # docker unavailable or launch failure
-    SOFTWARE = 70  # wheel build pipeline failed
+    SOFTWARE = 70  # build: non-pip packaging failure (not pip)
     CONFIG = 78  # invalid or unsupported job config
 
 
@@ -236,7 +239,7 @@ def _run_or_test(  # noqa: PLR0915  # pylint: disable=too-many-statements
 
 
 @app.command
-def build(
+def build(  # noqa: PLR0915  # pylint: disable=too-many-statements
     job_dir: DirectoryPath = Path(),
     mode: Annotated[
         Literal["host", "container"],
@@ -269,7 +272,13 @@ def build(
                 lambda: build_job(job, mode=mode),
                 worker_platform=worker_platform,
             )
-        except (OSError, PipError) as err:
+        except PipError as err:
+            raise GtkCommandError(
+                GtkExitCode.DATAERR,
+                "Dependency install failed",
+                str(err),
+            ) from None
+        except OSError as err:
             raise GtkCommandError(
                 GtkExitCode.SOFTWARE,
                 "Build failed",
