@@ -60,7 +60,7 @@ DEFAULT_TESTS_DIR: Final[str] = "tests"
 
 @dataclass(frozen=True, slots=True)
 class GlueJobProject:  # pylint: disable=too-many-instance-attributes
-    """Resolved job config for ``dependencies``, ``artifacts``, and ``cli``.
+    """Resolved job config for workflows, ``artifacts``, and ``cli``.
 
     Built only by :func:`load_pyproject`.
     Fields are fully resolved (no ``None`` for :attr:`version`).

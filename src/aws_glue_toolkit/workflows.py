@@ -1,7 +1,7 @@
 """Application orchestration for ``gtk`` build, run, and test.
 
-Wires :mod:`aws_glue_toolkit.dependencies` to
-:mod:`aws_glue_toolkit.docker` (host pip for ``build --mode host``,
+Wires :mod:`aws_glue_toolkit.requirements` and :mod:`aws_glue_toolkit.wheels`
+to :mod:`aws_glue_toolkit.container` (host pip for ``build --mode host``,
 container pip for ``build --mode container``, ``run``, and ``test``).
 No Rich panels, Cyclopts, or exit codes — callers in
 :mod:`aws_glue_toolkit.cli` map exceptions to user-facing output.
@@ -16,19 +16,18 @@ from aws_glue_toolkit.artifacts import (
     stage_gluewheels_zip,
     write_gluewheels_tree,
 )
-from aws_glue_toolkit.dependencies import (
-    GlueImagePinPolicy,
-    bundle_wheels,
-    glue_image_pin_policy,
-    prepare_requirements,
-    staged_requirements,
-)
-from aws_glue_toolkit.docker import (
+from aws_glue_toolkit.container import (
+    PytestContainerEntry,
+    SparkContainerEntry,
     host_pip_runner,
     pip_runner,
-    run_job,
-    run_tests,
+    run_in_glue_container,
 )
+from aws_glue_toolkit.requirements import (
+    open_dependency_session,
+    staged_requirements,
+)
+from aws_glue_toolkit.wheels import bundle_wheels
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -42,11 +41,6 @@ __all__ = [
 ]
 
 
-def _pin_policy(job: GlueJobProject) -> GlueImagePinPolicy:
-    """Image pin policy for merged direct job dependencies."""
-    return glue_image_pin_policy(job.runtime, job.dependencies)
-
-
 def _bundle_wheels_for_mode(
     job: GlueJobProject,
     dest: Path,
@@ -55,16 +49,16 @@ def _bundle_wheels_for_mode(
 ) -> dict[str, str]:
     """Prepare deps and run :func:`bundle_wheels` for ``mode``."""
     host = mode == "host"
-    policy = _pin_policy(job)
-    return bundle_wheels(
-        prepared=prepare_requirements(
-            job.dependencies,
-            job.project_dir,
-            for_container=not host,
-        ),
-        policy=policy,
-        dest=dest,
+    session = open_dependency_session(
+        job,
+        in_container=not host,
         runner=host_pip_runner() if host else pip_runner(job),
+    )
+    return bundle_wheels(
+        prepared=session.prepared,
+        policy=session.policy,
+        dest=dest,
+        runner=session.runner,
         cross_platform=host,
     )
 
@@ -136,18 +130,30 @@ def run(
     docker_platform = (
         None if platform == "native" else job.runtime.worker_docker_platform
     )
+    entry = SparkContainerEntry(job_args=job_args)
     if not job.dependencies:
-        return run_job(job, *job_args, platform=docker_platform)
-
-    prepared = prepare_requirements(job.dependencies, job.project_dir)
-    policy = _pin_policy(job)
-    with staged_requirements(prepared, policy) as (_work, mounts):
-        return run_job(
+        return run_in_glue_container(
             job,
-            *job_args,
             platform=docker_platform,
+            entry=entry,
+            dependency_session=None,
+        )
+
+    session = open_dependency_session(
+        job,
+        in_container=True,
+        runner=pip_runner(job),
+    )
+    with staged_requirements(session.prepared, session.policy) as (
+        _work,
+        mounts,
+    ):
+        return run_in_glue_container(
+            job,
+            platform=docker_platform,
+            entry=entry,
+            dependency_session=session,
             extra_volumes=mounts,
-            install_deps=True,
         )
 
 
@@ -177,19 +183,35 @@ def test(
         DockerError: Docker is unavailable or the container failed to launch.
 
     """
+    if not job.tests_dir.is_dir():
+        msg = f"tests directory not found: {job.tests_dir}"
+        raise ValueError(msg)
+
     docker_platform = (
         None if platform == "native" else job.runtime.worker_docker_platform
     )
+    entry = PytestContainerEntry(pytest_args=pytest_args)
     if not job.dependencies:
-        return run_tests(job, *pytest_args, platform=docker_platform)
-
-    prepared = prepare_requirements(job.dependencies, job.project_dir)
-    policy = _pin_policy(job)
-    with staged_requirements(prepared, policy) as (_work, mounts):
-        return run_tests(
+        return run_in_glue_container(
             job,
-            *pytest_args,
             platform=docker_platform,
+            entry=entry,
+            dependency_session=None,
+        )
+
+    session = open_dependency_session(
+        job,
+        in_container=True,
+        runner=pip_runner(job),
+    )
+    with staged_requirements(session.prepared, session.policy) as (
+        _work,
+        mounts,
+    ):
+        return run_in_glue_container(
+            job,
+            platform=docker_platform,
+            entry=entry,
+            dependency_session=session,
             extra_volumes=mounts,
-            install_deps=True,
         )

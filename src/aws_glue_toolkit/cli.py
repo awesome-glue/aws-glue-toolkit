@@ -37,13 +37,13 @@ from pydantic.types import (
 )
 from rich.panel import Panel
 
-from aws_glue_toolkit.app import build as build_job
-from aws_glue_toolkit.app import run as run_job
-from aws_glue_toolkit.app import test as test_job
-from aws_glue_toolkit.dependencies import PipError, RequirementPreparationError
-from aws_glue_toolkit.docker import DockerError
+from aws_glue_toolkit.container import DockerError
 from aws_glue_toolkit.job import load_pyproject
+from aws_glue_toolkit.requirements import PipError, RequirementPreparationError
 from aws_glue_toolkit.runtime import UnsupportedGlueVersionError
+from aws_glue_toolkit.workflows import build as workflow_build
+from aws_glue_toolkit.workflows import run as workflow_run
+from aws_glue_toolkit.workflows import test as workflow_test
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -269,7 +269,7 @@ def build(  # noqa: PLR0915  # pylint: disable=too-many-statements
         )
         try:
             project_dir = _handle_dependency_errors(
-                lambda: build_job(job, mode=mode),
+                lambda: workflow_build(job, mode=mode),
                 worker_platform=worker_platform,
             )
         except PipError as err:
@@ -321,7 +321,7 @@ def run(  # pylint: disable=keyword-arg-before-vararg
     return _run_or_test(
         job_dir,
         platform,
-        lambda job: run_job(job, *job_args, platform=platform),
+        lambda job: workflow_run(job, *job_args, platform=platform),
     )
 
 
@@ -351,5 +351,5 @@ def pytest_command(  # pylint: disable=keyword-arg-before-vararg
     return _run_or_test(
         job_dir,
         platform,
-        lambda job: test_job(job, *pytest_args, platform=platform),
+        lambda job: workflow_test(job, *pytest_args, platform=platform),
     )

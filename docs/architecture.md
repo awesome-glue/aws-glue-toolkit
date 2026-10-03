@@ -9,14 +9,15 @@ Domain facts, rules, and transforms. No CLI, Docker subprocesses, or terminal I/
 
 | Module | Responsibility |
 | --- | --- |
-| `paths.py` | Container mount constants; host→container path mapping |
+| `mounts.py` | Container mount constants; host→container path mapping |
 | `runtime.py` | Bundled Glue version JSON → `GlueRuntimeMetadata` |
 | `job.py` | `pyproject.toml` validation → `GlueJobProject` (merges `project.dependencies` then `tool.aws-glue-toolkit.dependencies`) |
-| `dependencies.py` | PEP 508 prep; `glue_image_pin_policy` (shared constraints + omit); pip dry-run (internal to wheel bundling), `pip wheel` / `pip download`, image-pin filtering; staged install for run/test; `PipRunner` injection |
+| `requirements.py` | PEP 508 prep; `glue_image_pin_policy`; staged install workspaces; `DependencySession` / `open_dependency_session`; `PipRunner` type |
+| `wheels.py` | `bundle_wheels`, internal dry-run report, Glue image pin omit |
 | `artifacts.py` | Zip layout for `.dependencies.zip` and gluewheels tree staging |
 
-Core modules must not import `docker`, `cli`, or `app`. Allowed sibling
-imports: `job` → `runtime`, `dependencies` → `runtime`, `dependencies` → `paths`.
+Core modules must not import `container`, `cli`, or `workflows`. Allowed sibling
+imports: `job` → `runtime`, `requirements` → `runtime`, `requirements` → `mounts`, `wheels` → `requirements`.
 
 ## Shell
 
@@ -24,12 +25,12 @@ Process boundaries and use-case orchestration:
 
 | Role | Module | Responsibility |
 | --- | --- | --- |
-| **Infra** | `docker.py` | `docker run` argv builders, `run_job`, `run_tests`, `run_pip_in_container`, `pip_runner`, `host_pip_runner`; host pip config snapshot → mounted `pip.conf` |
+| **Infra** | `container.py` | `docker run` argv builders, `run_in_glue_container`, `run_pip_in_container`, `pip_runner`, `host_pip_runner`; host pip config snapshot → mounted `pip.conf` |
 | **Infra** | `run_wrapper.py` | `spark-submit` entry for `gtk run`; clean container exit after the job |
-| **Application** | `app.py` | `build`, `run`, `test`; wires `dependencies` to host or container pip runners |
+| **Application** | `workflows.py` | `build`, `run`, `test`; `open_dependency_session` + injected `PipRunner` from `container` |
 | **Presentation** | `cli.py` | `gtk` entry point, `GtkCommandError`, exit codes, Rich panels |
 
-`app` raises domain exceptions (`PipError`, `DockerError`, `ValueError`,
+`workflows` raises domain exceptions (`PipError`, `DockerError`, `ValueError`,
 `OSError`, `RequirementPreparationError`) for `cli` to translate.
 
 ## Module graph
@@ -37,49 +38,53 @@ Process boundaries and use-case orchestration:
 ```mermaid
 flowchart TB
   subgraph core [Core]
-    paths[paths.py]
+    mounts[mounts.py]
     runtime[runtime.py]
     job[job.py]
-    dependencies[dependencies.py]
+    requirements[requirements.py]
+    wheels[wheels.py]
     artifacts[artifacts.py]
   end
 
   subgraph shell [Shell]
-    docker[docker.py]
+    container[container.py]
     runWrapper[run_wrapper.py]
-    app[app.py]
+    workflows[workflows.py]
     cli[cli.py]
   end
 
-  cli --> app
-  cli --> docker
+  cli --> workflows
+  cli --> container
   cli --> job
-  app --> job
-  app --> dependencies
-  app --> artifacts
-  app --> docker
+  workflows --> job
+  workflows --> requirements
+  workflows --> wheels
+  workflows --> artifacts
+  workflows --> container
   job --> runtime
-  dependencies --> runtime
-  dependencies --> paths
-  docker --> paths
-  docker --> dependencies
-  docker --> job
-  docker --> runWrapper
+  requirements --> job
+  requirements --> runtime
+  requirements --> mounts
+  wheels --> requirements
+  container --> mounts
+  container --> requirements
+  container --> job
+  container --> runWrapper
 ```
 
-- **Core** must not import `docker`, `cli`, or `app`.
-- **`dependencies`** must not import **`docker`** — use an injected `PipRunner` instead.
-- Multi-step workflows that need both pip and Docker are wired in **`app`**. `cli` may import both for error mapping; `docker` may use `dependencies` helpers for pip-in-container.
-- **`run_wrapper.py`** is mounted into the Glue container by `docker.run_job` as the `spark-submit` entry script.
+- **Core** must not import `container`, `cli`, or `workflows`.
+- **`requirements`** must not import **`container`** — use an injected `PipRunner` instead.
+- Multi-step workflows that need both pip and Docker are wired in **`workflows`**. `cli` may import both for error mapping; `container` imports **`requirements`** for pip-in-container types and errors.
+- **`run_wrapper.py`** is mounted into the Glue container by `container.run_in_glue_container` (Spark entry) as the `spark-submit` entry script.
 
 ## Command flows
 
-**build**, **run**, and **test** share `glue_image_pin_policy(job.runtime, job.dependencies)`: pip `--constraint` omits image pins for direct overrides; gluewheels omit still compares against the full image catalog.
+**build**, **run**, and **test** use `open_dependency_session` (pin policy + prepared specs + `PipRunner`): pip `--constraint` omits image pins for direct overrides; gluewheels omit still compares against the full image catalog.
 
 ### `gtk build`
 
 1. `artifacts.build_dependencies_zip` (host)
-2. `app.build` → `_bundle_wheels_for_mode` / `bundle_wheels` → `write_gluewheels_tree` → zip
+2. `workflows.build` → `open_dependency_session` → `bundle_wheels` → `write_gluewheels_tree` → zip
 
 Host: path/VCS `pip wheel --no-deps` → dry-run resolve → per pin `pip download --only-binary` or sdist→wheel → portable assert; omit image pins.  
 Container: `pip wheel` in Docker; omit image pins.
@@ -88,11 +93,11 @@ Use **`gtk build`** to verify dependencies (same pip recipes as packaging; write
 
 ### `gtk run` / `gtk test`
 
-`cli` → `app.run` / `app.test` (`--platform native|worker`) →
-`dependencies.prepare_requirements` (when deps are present) →
-`dependencies.staged_requirements` → `docker.run_job` / `docker.run_tests`
+`cli` → `workflows.run` / `workflows.test` (`--platform native|worker`) →
+`open_dependency_session` (when deps are present) →
+`staged_requirements` → `container.run_in_glue_container`
 (pip install ``--target`` then spark-submit / pytest in one ephemeral
-container).
+container when a dependency session is open).
 
 - **`--platform native` (default):** `build_run_argv` omits Docker
   ``--platform`` (multi-arch image matches the host).
@@ -102,13 +107,10 @@ container).
 Container ``pip_runner`` (``build --mode container``) always uses
 ``worker_docker_platform``.
 
-For `gtk run`, `docker.run_job` mounts `run_wrapper.py` as the
-`spark-submit` entry so the container returns after the job script
-finishes.
-
-### Planned refactors
-
-Later phases ([redesign-phases/phase-3-dependency-session.md](redesign-phases/phase-3-dependency-session.md), [phase-4-run-in-glue-container.md](redesign-phases/phase-4-run-in-glue-container.md)) introduce **`DependencySession`** / **`open_dependency_session`** and **`run_in_glue_container`** to reduce duplicated pip and Docker wiring. Behavior stays the same until those land.
+For `gtk run`, `container.run_in_glue_container` with a Spark entry mounts
+`run_wrapper.py` as the `spark-submit` entry so the container returns
+after the job script finishes. **`workflows.test`** validates `tests_dir` before
+calling the container adapter; **`run`** does not check the tests directory.
 
 ## Git and VCS dependencies
 
@@ -117,14 +119,14 @@ Git direct URLs are passed through to pip. See
 
 ## Adding code
 
-1. Fact, rule, or transform → core (`paths`, `runtime`, `job`, `dependencies`, `artifacts`)
-2. Multi-step user workflow → `app.py`
-3. Subprocess or Docker argv → `docker.py`
+1. Fact, rule, or transform → core (`mounts`, `runtime`, `job`, `requirements`, `wheels`, `artifacts`)
+2. Multi-step user workflow → `workflows.py`
+3. Subprocess or Docker argv → `container.py`
 4. In-container `spark-submit` entry for `gtk run` → `run_wrapper.py`
 5. Terminal, Cyclopts, or exit codes → `cli.py`
 
 If a change needs both pip and Docker for a user-facing workflow, wire it in
-**`app`**, not in **`dependencies`**.
+**`workflows`**, not in **`requirements`**.
 
 ## Public API
 
@@ -132,8 +134,9 @@ Library callers may import Python modules, but only the **`gtk` command-line int
 
 - `from aws_glue_toolkit.job import load_pyproject, GlueJobProject`
 - `from aws_glue_toolkit.runtime import load_runtime`
-- `from aws_glue_toolkit.dependencies import glue_image_pin_policy, prepare_requirements`
+- `from aws_glue_toolkit.requirements import glue_image_pin_policy, prepare_requirements`
+- `from aws_glue_toolkit.wheels import bundle_wheels`
 - `from aws_glue_toolkit.artifacts import build_dependencies_zip`
-- `from aws_glue_toolkit.app import build, run, test`
+- `from aws_glue_toolkit.workflows import build, run, test`
 
 The `gtk` CLI is registered at `aws_glue_toolkit.cli:app`.

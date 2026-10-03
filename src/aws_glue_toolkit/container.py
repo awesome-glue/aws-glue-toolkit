@@ -5,18 +5,19 @@ host``).
 
 Pure builders produce ``docker run``, ``spark-submit``, ``pytest``, and pip
 argv lists; :func:`run_container` and :func:`run_container_capture` are the
-subprocess shells. :func:`run_job` mounts
-:mod:`aws_glue_toolkit.run_wrapper` so ``gtk run`` returns after the job
-finishes.
+subprocess shells. :func:`run_in_glue_container` orchestrates ``gtk run`` and
+``gtk test``; Spark entries mount :mod:`aws_glue_toolkit.run_wrapper` so the
+container returns after the job finishes.
 
-Public API: :func:`build_run_argv`, :func:`build_spark_submit_argv`,
-:func:`build_pytest_argv`, :func:`build_pip_argv`, :func:`run_container`,
-:func:`run_container_capture`, :func:`run_pip_in_container`,
-:func:`run_job`, :func:`run_tests`, :func:`pip_runner`,
-:func:`host_pip_runner`, :exc:`DockerError`.
+Public API: :class:`ContainerEntry`, :class:`SparkContainerEntry`,
+:class:`PytestContainerEntry`, :func:`build_run_argv`,
+:func:`build_spark_submit_argv`, :func:`build_pytest_argv`,
+:func:`build_pip_argv`, :func:`run_container`, :func:`run_container_capture`,
+:func:`run_in_glue_container`, :func:`run_pip_in_container`,
+:func:`pip_runner`, :func:`host_pip_runner`, :exc:`DockerError`.
 
-Container mount paths live in :mod:`aws_glue_toolkit.paths`. Host pip
-config is snapshotted to :data:`~aws_glue_toolkit.paths.PIP_CONFIG_MOUNT`
+Container mount paths live in :mod:`aws_glue_toolkit.mounts`. Host pip
+config is snapshotted to :data:`~aws_glue_toolkit.mounts.PIP_CONFIG_MOUNT`
 inside the container.
 
 Note:
@@ -31,6 +32,7 @@ from __future__ import annotations
 from ast import literal_eval
 from collections import defaultdict
 from contextlib import contextmanager
+from dataclasses import dataclass
 from importlib.resources import as_file, files
 from pathlib import Path
 from shlex import join as shlex_join
@@ -41,19 +43,20 @@ from sys import executable
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
-from aws_glue_toolkit.dependencies import (
-    PipError,
-    PipRunner,
-    pip_error_from_returncode,
-    pip_install_target_args,
-)
-from aws_glue_toolkit.paths import (
+from aws_glue_toolkit.mounts import (
     PIP_CONFIG_MOUNT,
     PYTHON_TARGET_MOUNT,
     RUN_WRAPPER_MOUNT,
     WORKSPACE_MOUNT,
     project_path,
     rewrite_path_arg,
+)
+from aws_glue_toolkit.requirements import (
+    DependencySession,
+    PipError,
+    PipRunner,
+    pip_error_from_returncode,
+    pip_install_target_args,
 )
 
 if TYPE_CHECKING:
@@ -62,7 +65,10 @@ if TYPE_CHECKING:
     from aws_glue_toolkit.job import GlueJobProject
 
 __all__ = [
+    "ContainerEntry",
     "DockerError",
+    "PytestContainerEntry",
+    "SparkContainerEntry",
     "build_pip_argv",
     "build_pytest_argv",
     "build_run_argv",
@@ -71,10 +77,28 @@ __all__ = [
     "pip_runner",
     "run_container",
     "run_container_capture",
-    "run_job",
+    "run_in_glue_container",
     "run_pip_in_container",
-    "run_tests",
 ]
+
+# --- Container run entry (spark-submit vs pytest) ---
+
+
+@dataclass(frozen=True)
+class SparkContainerEntry:
+    """Spark job run inside the Glue image (``gtk run``)."""
+
+    job_args: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PytestContainerEntry:
+    """Pytest run inside the Glue image (``gtk test``)."""
+
+    pytest_args: tuple[str, ...]
+
+
+ContainerEntry = SparkContainerEntry | PytestContainerEntry
 
 # Host-local / path-bound options omitted from the container pip.conf.
 _PIP_CONFIG_SKIP_KEYS = frozenset(
@@ -229,7 +253,7 @@ def build_run_argv(  # noqa: PLR0913  # pylint: disable=too-many-arguments
     Args:
         image: Glue local Docker image reference.
         project_dir: Job root directory mounted at
-            :data:`~aws_glue_toolkit.paths.WORKSPACE_MOUNT`.
+            :data:`~aws_glue_toolkit.mounts.WORKSPACE_MOUNT`.
         container_command: Tokens after the image name.
         platform: Docker ``--platform`` value, or ``None`` to omit (native
             multi-arch selection).
@@ -411,13 +435,13 @@ def run_pip_in_container(
     Rewrites absolute host paths in ``pip_args`` that fall under
     ``volume_mounts`` to their container paths. Mounts a snapshot of the
     host's effective pip config at
-    :data:`~aws_glue_toolkit.paths.PIP_CONFIG_MOUNT` and sets
+    :data:`~aws_glue_toolkit.mounts.PIP_CONFIG_MOUNT` and sets
     ``PIP_CONFIG_FILE`` to that path.
 
     Args:
         image: Glue local Docker image reference.
         project_dir: Job root directory mounted at
-            :data:`~aws_glue_toolkit.paths.WORKSPACE_MOUNT`.
+            :data:`~aws_glue_toolkit.mounts.WORKSPACE_MOUNT`.
         pip_args: Arguments passed to ``python3 -m pip``.
         platform: Docker ``--platform`` (worker arch for container pip).
         volume_mounts: Extra ``(host_path, container_mount)`` pairs for
@@ -452,7 +476,7 @@ def run_pip_in_container(
 
 
 def pip_runner(job: GlueJobProject) -> PipRunner:
-    """Return a Docker :class:`~aws_glue_toolkit.dependencies.PipRunner`.
+    """Return a Docker :class:`~aws_glue_toolkit.requirements.PipRunner`.
 
     Always uses the Glue worker Docker platform from runtime metadata.
     """
@@ -481,7 +505,7 @@ def pip_runner(job: GlueJobProject) -> PipRunner:
 
 
 def host_pip_runner() -> PipRunner:
-    """Return a host :class:`~aws_glue_toolkit.dependencies.PipRunner`.
+    """Return a host :class:`~aws_glue_toolkit.requirements.PipRunner`.
 
     Runs ``python -m pip`` with the current interpreter. Volume mounts are
     ignored; host paths in ``args`` are used as-is.
@@ -513,31 +537,46 @@ def host_pip_runner() -> PipRunner:
     return execute_pip
 
 
-def run_job(
+def _run_glue_container_command(
     job: GlueJobProject,
-    *job_args: str,
-    platform: str | None = None,
-    extra_volumes: Sequence[tuple[Path, str]] = (),
-    install_deps: bool = False,
+    *,
+    platform: str | None,
+    container_command: Sequence[str],
+    extra_volumes: Sequence[tuple[Path, str]],
+    install_deps: bool,
 ) -> int:
-    """Run the job via ``spark-submit`` in the Glue Docker image.
+    """Launch one Glue image container; optionally mount host pip config."""
+    if install_deps:
+        with _host_pip_config_bind() as (pip_conf_mount, env_forwards):
+            return run_container(
+                build_run_argv(
+                    job.runtime.docker_image,
+                    job.project_dir,
+                    container_command,
+                    platform=platform,
+                    extra_volumes=[*extra_volumes, pip_conf_mount],
+                    env_forwards=env_forwards,
+                ),
+            )
+    return run_container(
+        build_run_argv(
+            job.runtime.docker_image,
+            job.project_dir,
+            container_command,
+            platform=platform,
+            extra_volumes=extra_volumes,
+        ),
+    )
 
-    Mounts :mod:`aws_glue_toolkit.run_wrapper` as the ``spark-submit`` entry
-    so the container returns after the job script finishes.
 
-    Args:
-        job: Resolved job config from
-            :func:`~aws_glue_toolkit.job.load_pyproject`.
-        *job_args: Tokens forwarded to ``spark-submit`` after ``--JOB_NAME``.
-        platform: Docker ``--platform``, or ``None`` for native multi-arch.
-        extra_volumes: Extra host→container binds (pip work, ``file:`` deps).
-        install_deps: When true, pip-install job deps into the ephemeral
-            container before ``spark-submit`` and mount host pip config.
-
-    Returns:
-        Container exit code.
-
-    """
+def _run_spark_in_glue_container(
+    job: GlueJobProject,
+    *,
+    platform: str | None,
+    job_args: Sequence[str],
+    extra_volumes: Sequence[tuple[Path, str]],
+    install_deps: bool,
+) -> int:
     wrapper = files("aws_glue_toolkit").joinpath("run_wrapper.py")
     with as_file(wrapper) as wrapper_host:
         volumes: list[tuple[Path, str]] = [
@@ -551,64 +590,30 @@ def run_job(
                 job.name,
                 job_args,
             )
-            with _host_pip_config_bind() as (pip_conf_mount, env_forwards):
-                return run_container(
-                    build_run_argv(
-                        job.runtime.docker_image,
-                        job.project_dir,
-                        container_command,
-                        platform=platform,
-                        extra_volumes=[*volumes, pip_conf_mount],
-                        env_forwards=env_forwards,
-                    ),
-                )
-
-        container_command = build_spark_submit_argv(
-            job.project_dir,
-            job.script,
-            job.name,
-            job_args,
-        )
-        return run_container(
-            build_run_argv(
-                job.runtime.docker_image,
+        else:
+            container_command = build_spark_submit_argv(
                 job.project_dir,
-                container_command,
-                platform=platform,
-                extra_volumes=volumes,
-            ),
+                job.script,
+                job.name,
+                job_args,
+            )
+        return _run_glue_container_command(
+            job,
+            platform=platform,
+            container_command=container_command,
+            extra_volumes=volumes,
+            install_deps=install_deps,
         )
 
 
-def run_tests(
+def _run_pytest_in_glue_container(
     job: GlueJobProject,
-    *pytest_args: str,
-    platform: str | None = None,
-    extra_volumes: Sequence[tuple[Path, str]] = (),
-    install_deps: bool = False,
+    *,
+    platform: str | None,
+    pytest_args: Sequence[str],
+    extra_volumes: Sequence[tuple[Path, str]],
+    install_deps: bool,
 ) -> int:
-    """Run pytest in the Glue Docker image.
-
-    Args:
-        job: Resolved job config from
-            :func:`~aws_glue_toolkit.job.load_pyproject`.
-        *pytest_args: Tokens forwarded to ``pytest``.
-        platform: Docker ``--platform``, or ``None`` for native multi-arch.
-        extra_volumes: Extra host→container binds (pip work, ``file:`` deps).
-        install_deps: When true, pip-install job deps into the ephemeral
-            container before pytest and mount host pip config.
-
-    Returns:
-        Container exit code.
-
-    Raises:
-        ValueError: Configured tests directory does not exist.
-
-    """
-    if not job.tests_dir.is_dir():
-        msg = f"tests directory not found: {job.tests_dir}"
-        raise ValueError(msg)
-
     if install_deps:
         container_command = build_install_and_pytest_argv(
             job.project_dir,
@@ -616,30 +621,64 @@ def run_tests(
             job.tests_dir,
             pytest_args,
         )
-        with _host_pip_config_bind() as (pip_conf_mount, env_forwards):
-            return run_container(
-                build_run_argv(
-                    job.runtime.docker_image,
-                    job.project_dir,
-                    container_command,
-                    platform=platform,
-                    extra_volumes=[*extra_volumes, pip_conf_mount],
-                    env_forwards=env_forwards,
-                ),
-            )
-
-    container_command = build_pytest_argv(
-        job.project_dir,
-        job.source_dir,
-        job.tests_dir,
-        pytest_args,
-    )
-    return run_container(
-        build_run_argv(
-            job.runtime.docker_image,
+    else:
+        container_command = build_pytest_argv(
             job.project_dir,
-            container_command,
+            job.source_dir,
+            job.tests_dir,
+            pytest_args,
+        )
+    return _run_glue_container_command(
+        job,
+        platform=platform,
+        container_command=container_command,
+        extra_volumes=extra_volumes,
+        install_deps=install_deps,
+    )
+
+
+def run_in_glue_container(
+    job: GlueJobProject,
+    *,
+    platform: str | None,
+    entry: ContainerEntry,
+    dependency_session: DependencySession | None,
+    extra_volumes: Sequence[tuple[Path, str]] = (),
+) -> int:
+    """Run ``spark-submit`` or ``pytest`` in the Glue Docker image.
+
+    When ``dependency_session`` is not ``None``, pip-installs job dependencies
+    in the same ephemeral container and mounts a host pip configuration
+    snapshot. ``extra_volumes`` supplies staging binds (for example monorepo
+    ``file:`` paths) from the caller's
+    :func:`~aws_glue_toolkit.requirements.staged_requirements` context.
+
+    Args:
+        job: Resolved job config from
+            :func:`~aws_glue_toolkit.job.load_pyproject`.
+        platform: Docker ``--platform``, or ``None`` for native multi-arch.
+        entry: Spark or pytest command description.
+        dependency_session: When set, run the install-deps recipe before the
+            main command; when ``None``, skip pip install and pip config mount.
+        extra_volumes: Extra host→container binds (pip work, ``file:`` deps).
+
+    Returns:
+        Container exit code.
+
+    """
+    install_deps = dependency_session is not None
+    if isinstance(entry, SparkContainerEntry):
+        return _run_spark_in_glue_container(
+            job,
             platform=platform,
+            job_args=entry.job_args,
             extra_volumes=extra_volumes,
-        ),
+            install_deps=install_deps,
+        )
+    return _run_pytest_in_glue_container(
+        job,
+        platform=platform,
+        pytest_args=entry.pytest_args,
+        extra_volumes=extra_volumes,
+        install_deps=install_deps,
     )

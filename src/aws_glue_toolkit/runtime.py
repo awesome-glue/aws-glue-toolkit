@@ -19,12 +19,14 @@ Bundled JSON is validated before release.
 :exc:`UnsupportedGlueVersionError` when a version file is missing.
 :mod:`aws_glue_toolkit.job` calls it when loading ``pyproject.toml`` into
 :attr:`~aws_glue_toolkit.job.GlueJobProject.runtime`.
-:mod:`aws_glue_toolkit.app` and :mod:`aws_glue_toolkit.dependencies` consume
+:mod:`aws_glue_toolkit.workflows` and
+:mod:`aws_glue_toolkit.requirements` consume
 :class:`GlueRuntimeMetadata` (or one loaded directly via
 :func:`load_runtime`).
 
-:mod:`aws_glue_toolkit.dependencies` uses ``docker_image`` and
-``python_packages`` (constraints and gluewheels pin omit). A direct job
+:mod:`aws_glue_toolkit.requirements` uses ``python_packages`` for pip
+constraints and gluewheels omit; :mod:`aws_glue_toolkit.container` uses
+``docker_image``. A direct job
 dependency that names a ``python_packages`` entry is excluded from pip
 constraints so the job pin can override the image version.
 ``pip_platform`` and ``core_engines.python`` feed host
