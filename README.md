@@ -78,7 +78,7 @@ gtk build .
 
 ## Commands
 
-`[JOB-DIR]` is the job directory path (positional or `--job-dir`; default `.`). Docker is required for `run`, `test`, and `--mode container` on `build` (Glue image pulled on first use). Default `--mode host` does not. `gtk` never installs Docker.
+`[JOB-DIR]` is the job directory path (default `.`). On **`build`**, use the positional argument or `--job-dir`. On **`run`** and **`test`**, use the positional argument only. Docker is required for `run`, `test`, and `--mode container` on `build` (Glue image pulled on first use). Default `--mode host` does not. `gtk` never installs Docker.
 
 **Packaging — `build --mode`** chooses *where pip builds wheels*: **`host`** (default) local pip for worker-oriented resolve and packaging (no Docker); **`container`** worker-arch Glue build container (may need QEMU on ARM).
 
@@ -157,13 +157,13 @@ You may still list relative `file:` specs under `[project].dependencies`; `gtk` 
 
 ### test
 
-`python3 -m pytest`. `PYTHONPATH` includes `source` (and the install target when deps are present). Default target is the configured `tests` dir; if the first forwarded token starts with `-`, that dir is still passed first (`gtk test . -v`); if it is a path, only those tokens go to pytest.
+`python3 -m pytest`. The configured `tests` directory must exist before `gtk test` runs (exit code 78 if it is missing). `PYTHONPATH` includes `source` (and the install target when deps are present). Default target is the configured `tests` dir; if the first forwarded token starts with `-`, that dir is still passed first (`gtk test . -v`); if it is a path, only those tokens go to pytest.
 
 Same `--platform native|worker` as `run`. Prefer `--platform worker` (or amd64 CI / real Glue) when validating native libs or Spark bits that can differ by CPU.
 
 ### Exit codes
 
-Documented failures use Berkeley `sysexits`-style codes in the 64–78 band. **`build`** never passthroughs another program’s exit code. **`run`** and **`test`** return the job or pytest exit code when the container reaches the main command.
+Documented failures use Berkeley `sysexits`-style codes in the 64–78 band. **`build`** does not pass through another program’s exit code. **`run`** and **`test`** return the job or pytest exit code when the container reaches the main command.
 
 | Code | Meaning |
 | --- | --- |
@@ -171,7 +171,7 @@ Documented failures use Berkeley `sysexits`-style codes in the 64–78 band. **`
 | 66 | `pyproject.toml` missing or unreadable |
 | 69 | Docker not available or could not be started |
 | 70 | **`build` only:** zip or other non-pip packaging failure (not pip) |
-| 78 | Invalid `pyproject.toml`, job layout, unsupported Glue version, or invalid dependency |
+| 78 | Invalid `pyproject.toml`, job layout (missing source, script, or tests directory), unsupported Glue version, or invalid dependency |
 
 Success is `0`; unhandled errors are `1`. For `run` / `test`, a successful Docker launch returns the container command’s exit code (for example pytest `1` means tests failed, not invalid configuration).
 

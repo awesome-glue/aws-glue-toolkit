@@ -56,19 +56,17 @@ flowchart TB
   cli --> workflows
   cli --> container
   cli --> job
-  workflows --> job
+  cli --> requirements
+  cli --> runtime
   workflows --> requirements
   workflows --> wheels
   workflows --> artifacts
   workflows --> container
   job --> runtime
-  requirements --> job
-  requirements --> runtime
   requirements --> mounts
   wheels --> requirements
   container --> mounts
   container --> requirements
-  container --> job
   container --> runWrapper
 ```
 
@@ -86,8 +84,8 @@ flowchart TB
 1. `artifacts.build_dependencies_zip` (host)
 2. `workflows.build` → `open_dependency_session` → `bundle_wheels` → `write_gluewheels_tree` → zip
 
-Host: path/VCS `pip wheel --no-deps` → dry-run resolve → per pin `pip download --only-binary` or sdist→wheel → portable assert; omit image pins.  
-Container: `pip wheel` in Docker; omit image pins.
+Host: path/VCS `pip wheel --no-deps` → dry-run resolve → per pin `pip download --only-binary` or sdist→wheel → portable assert; omit matching wheels from gluewheels.  
+Container: `pip wheel` in Docker; omit matching wheels from gluewheels.
 
 Use **`gtk build`** to verify dependencies (same pip recipes as packaging; writes zips on success).
 

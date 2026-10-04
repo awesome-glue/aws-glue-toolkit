@@ -258,8 +258,8 @@ def build(  # noqa: PLR0915  # pylint: disable=too-many-statements
     ``{name}-{version}.gluewheels.zip``. Default ``--mode host``: host
     ``pip wheel --no-deps`` for path/VCS; ``pip download --platform`` or
     sdist→wheel for other packages (portable tags only). ``--mode
-    container``: ``pip wheel`` in the Glue image (worker-arch). Omits Glue
-    image pins.
+    container``: ``pip wheel`` in the Glue image (worker-arch). Omits from
+    gluewheels any package whose resolved version matches an image pin.
 
     """
     try:
@@ -346,7 +346,8 @@ def pytest_command(
 
     Installs job dependencies into the ephemeral container when present.
     Uses ``tool.aws-glue-toolkit.tests`` and sets ``PYTHONPATH`` to
-    ``source``. Forwards additional tokens after ``job_dir`` to ``pytest``.
+    ``source`` (and the pip install target when job dependencies are
+    present). Forwards additional tokens after ``job_dir`` to ``pytest``.
     Container stdout and stderr pass through unchanged.
 
     """

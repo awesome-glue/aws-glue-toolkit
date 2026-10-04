@@ -60,11 +60,11 @@ __all__ = [
 
 
 class RequirementPreparationError(ValueError):
-    """A dependency spec could not be prepared for container pip."""
+    """A dependency spec could not be prepared for host or container pip."""
 
 
 class PipError(Exception):
-    """``pip`` subprocess failed during resolution or wheel bundling."""
+    """``pip`` failed during resolution, install, or wheel bundling."""
 
     def __init__(
         self,
@@ -139,7 +139,7 @@ def prepare_requirements(
     """Prepare dependency specs for pip (container or host).
 
     Args:
-        specs: PEP 508 requirement strings from ``project.dependencies``.
+        specs: PEP 508 requirement strings (merged job dependencies).
         project_dir: Job root directory. When ``for_container``, mounted at
             :data:`~aws_glue_toolkit.mounts.WORKSPACE_MOUNT`.
         for_container: When true (default), rewrite ``file:`` URLs to

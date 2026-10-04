@@ -63,7 +63,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/) for the subject
 ```text
 feat(runtime): add load_runtime
 fix: correct wheel packaging for data files
-docs: clarify GlueVersion in docstrings
+docs: clarify GlueRuntimeMetadata in docstrings
 ```
 
 ## Pull requests
