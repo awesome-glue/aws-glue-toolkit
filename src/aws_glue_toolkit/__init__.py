@@ -20,7 +20,8 @@ Modules:
 - :mod:`aws_glue_toolkit.mounts` — container mount paths and path mapping
 - :mod:`aws_glue_toolkit.runtime` — bundled per-version Glue runtime pins
 
-See ``docs/architecture.md`` for the two-layer layout (core and shell).
+Core modules hold domain logic; shell modules run Docker, workflows, and the
+``gtk`` command-line interface. See ``CONTRIBUTING.md`` for the module list.
 
 Import submodules directly for library APIs (for example
 ``from aws_glue_toolkit.job import load_pyproject``).

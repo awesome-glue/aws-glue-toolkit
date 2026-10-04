@@ -1,13 +1,13 @@
 # Contributing
 
-Thank you for your interest in AWS Glue Toolkit. This guide covers local setup, the change workflow, and what to expect when opening a pull request.
+Thank you for your interest in AWS Glue Toolkit. This guide covers local setup and the change workflow. It also describes what to expect when you open a pull request.
 
 ## Prerequisites
 
 - Python 3.11+
-- [Docker](https://docs.docker.com/get-docker/) (for manual `gtk` smoke tests against a sample job)
+- [Docker](https://docs.docker.com/get-docker/) (to run `gtk` against a sample job on your machine)
 - [uv](https://docs.astral.sh/uv/) (dependency and environment management)
-- [just](https://github.com/casey/just) (optional; wraps common dev commands)
+- [just](https://github.com/casey/just) (optional; wraps common development commands)
 
 ## Setup
 
@@ -17,7 +17,9 @@ From the repository root:
 just init
 ```
 
-This installs the project Python version, syncs dev dependencies, and installs pre-commit hooks. Without `just`, run the equivalent:
+`just init` installs the project Python version, syncs development dependencies, and installs pre-commit hooks.
+
+If you do not use `just`, run:
 
 ```bash
 uv python install
@@ -27,16 +29,26 @@ uv run pre-commit install
 
 ## Architecture
 
-Before changing code, read [docs/architecture.md](docs/architecture.md). The package follows a **functional core / imperative shell** split:
+Review the layout below before you change code. The package uses a **functional core / imperative shell** split.
 
-- **Core** (`mounts.py`, `runtime.py`, `job.py`, `requirements.py`, `wheels.py`, `artifacts.py`) — domain logic (parsing, pins, wheels, zip layout).
-- **Shell** (`container.py`, `run_wrapper.py`, `workflows.py`, `cli.py`) — subprocess orchestration, use-case wiring, the `gtk run` spark-submit entry, and the `gtk` CLI.
+- **Core** (`mounts.py`, `runtime.py`, `job.py`, `requirements.py`, `wheels.py`, `artifacts.py`) — domain logic: parsing, pins, wheels, and zip layout.
+- **Shell** (`container.py`, `run_wrapper.py`, `workflows.py`, `cli.py`) — subprocess orchestration, use-case wiring, the `gtk run` spark-submit entry, and the `gtk` command-line interface.
 
 Put new business rules and transforms in core modules. Keep subprocess calls, exit-code mapping, and Rich output in the shell layer.
 
+### Where to add code
+
+1. Fact, rule, or transform → core modules listed above.
+2. Multi-step user workflow → `workflows.py`.
+3. Subprocess or Docker argument lists → `container.py`.
+4. In-container `spark-submit` entry for `gtk run` → `run_wrapper.py`.
+5. Terminal presentation, Cyclopts, or exit codes → `cli.py`.
+
+When a change needs both pip and Docker for a user-facing workflow, wire it in **`workflows`** and pass a **`PipRunner`** into **`requirements`** helpers.
+
 ### Stable interface
 
-The stable **`gtk` command-line interface** is defined in [README.md](README.md#stability) (commands, flags, exit codes).
+The stable interface is the **`gtk` command-line interface**. See [README.md](README.md#stability) for commands, flags, and exit codes.
 
 ## Making changes
 
@@ -47,7 +59,7 @@ The stable **`gtk` command-line interface** is defined in [README.md](README.md#
    just lint
    ```
 
-   For a full sweep (matches CI):
+   For a full sweep that matches continuous integration:
 
    ```bash
    uv run pre-commit run --all-files
@@ -58,7 +70,7 @@ The stable **`gtk` command-line interface** is defined in [README.md](README.md#
 
 ## Commit messages
 
-Use [Conventional Commits](https://www.conventionalcommits.org/) for the subject line, for example:
+Use [Conventional Commits](https://www.conventionalcommits.org/) for commit subjects, for example:
 
 ```text
 feat(runtime): add load_runtime
@@ -69,13 +81,13 @@ docs: clarify GlueRuntimeMetadata in docstrings
 ## Pull requests
 
 - Keep diffs focused on one concern.
-- Ensure pre-commit passes before requesting review.
-- Use a Conventional Commit-style PR title when possible.
+- Ensure pre-commit passes before you request review.
+- Use a [Conventional Commits](https://www.conventionalcommits.org/) subject line for the pull request title when possible.
 
 ## Code of conduct
 
-Participants are expected to follow our [Code of Conduct](CODE_OF_CONDUCT.md).
+Follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Security
 
-Report vulnerabilities privately via [SECURITY.md](SECURITY.md) — do not open public issues for security reports.
+Report security vulnerabilities through [SECURITY.md](SECURITY.md).
