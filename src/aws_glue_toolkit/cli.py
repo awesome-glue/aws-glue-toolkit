@@ -241,6 +241,7 @@ def _run_or_test(  # noqa: PLR0915  # pylint: disable=too-many-statements
 @app.command
 def build(  # noqa: PLR0915  # pylint: disable=too-many-statements
     job_dir: DirectoryPath = Path(),
+    /,
     mode: Annotated[
         Literal["host", "container"],
         Parameter(

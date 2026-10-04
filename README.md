@@ -78,7 +78,7 @@ gtk build .
 
 ## Commands
 
-`[JOB-DIR]` is the job directory path (default `.`). On **`build`**, use the positional argument or `--job-dir`. On **`run`** and **`test`**, use the positional argument only. Docker is required for `run`, `test`, and `--mode container` on `build` (Glue image pulled on first use). Default `--mode host` does not. `gtk` never installs Docker.
+`[JOB-DIR]` is the job directory path as the first positional argument (default `.`) on **`build`**, **`run`**, and **`test`**. Docker is required for `run`, `test`, and `--mode container` on `build` (Glue image pulled on first use). Default `--mode host` does not. `gtk` never installs Docker.
 
 **Packaging — `build --mode`** chooses *where pip builds wheels*: **`host`** (default) local pip for worker-oriented resolve and packaging (no Docker); **`container`** worker-arch Glue build container (may need QEMU on ARM).
 
