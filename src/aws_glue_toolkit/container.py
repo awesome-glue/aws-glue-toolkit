@@ -544,94 +544,55 @@ def _run_glue_container_command(
     install_deps: bool,
 ) -> int:
     """Launch one Glue image container; optionally mount host pip config."""
+
+    def launch(
+        volumes: Sequence[tuple[Path, str]],
+        env_forwards: Sequence[str],
+    ) -> int:
+        return run_container(
+            build_run_argv(
+                job.runtime.docker_image,
+                job.project_dir,
+                container_command,
+                platform=platform,
+                extra_volumes=volumes,
+                env_forwards=env_forwards,
+            ),
+        )
+
     if install_deps:
         with _host_pip_config_bind() as (pip_conf_mount, env_forwards):
-            return run_container(
-                build_run_argv(
-                    job.runtime.docker_image,
-                    job.project_dir,
-                    container_command,
-                    platform=platform,
-                    extra_volumes=[*extra_volumes, pip_conf_mount],
-                    env_forwards=env_forwards,
-                ),
-            )
-    return run_container(
-        build_run_argv(
-            job.runtime.docker_image,
+            return launch([*extra_volumes, pip_conf_mount], env_forwards)
+    return launch(extra_volumes, ())
+
+
+def _container_command_for_entry(
+    job: GlueJobProject,
+    entry: ContainerEntry,
+    *,
+    install_deps: bool,
+) -> list[str]:
+    """Build container argv tokens for a Spark or pytest entry."""
+    if isinstance(entry, SparkContainerEntry):
+        spark_builder = (
+            build_install_and_spark_submit_argv
+            if install_deps
+            else build_spark_submit_argv
+        )
+        return spark_builder(
             job.project_dir,
-            container_command,
-            platform=platform,
-            extra_volumes=extra_volumes,
-        ),
+            job.script,
+            job.name,
+            entry.job_args,
+        )
+    pytest_builder = (
+        build_install_and_pytest_argv if install_deps else build_pytest_argv
     )
-
-
-def _run_spark_in_glue_container(
-    job: GlueJobProject,
-    *,
-    platform: str | None,
-    job_args: Sequence[str],
-    extra_volumes: Sequence[tuple[Path, str]],
-    install_deps: bool,
-) -> int:
-    wrapper = files("aws_glue_toolkit").joinpath("run_wrapper.py")
-    with as_file(wrapper) as wrapper_host:
-        volumes: list[tuple[Path, str]] = [
-            *extra_volumes,
-            (Path(wrapper_host), RUN_WRAPPER_MOUNT),
-        ]
-        if install_deps:
-            container_command = build_install_and_spark_submit_argv(
-                job.project_dir,
-                job.script,
-                job.name,
-                job_args,
-            )
-        else:
-            container_command = build_spark_submit_argv(
-                job.project_dir,
-                job.script,
-                job.name,
-                job_args,
-            )
-        return _run_glue_container_command(
-            job,
-            platform=platform,
-            container_command=container_command,
-            extra_volumes=volumes,
-            install_deps=install_deps,
-        )
-
-
-def _run_pytest_in_glue_container(
-    job: GlueJobProject,
-    *,
-    platform: str | None,
-    pytest_args: Sequence[str],
-    extra_volumes: Sequence[tuple[Path, str]],
-    install_deps: bool,
-) -> int:
-    if install_deps:
-        container_command = build_install_and_pytest_argv(
-            job.project_dir,
-            job.source_dir,
-            job.tests_dir,
-            pytest_args,
-        )
-    else:
-        container_command = build_pytest_argv(
-            job.project_dir,
-            job.source_dir,
-            job.tests_dir,
-            pytest_args,
-        )
-    return _run_glue_container_command(
-        job,
-        platform=platform,
-        container_command=container_command,
-        extra_volumes=extra_volumes,
-        install_deps=install_deps,
+    return pytest_builder(
+        job.project_dir,
+        job.source_dir,
+        job.tests_dir,
+        entry.pytest_args,
     )
 
 
@@ -665,18 +626,28 @@ def run_in_glue_container(
 
     """
     install_deps = dependency_session is not None
-    if isinstance(entry, SparkContainerEntry):
-        return _run_spark_in_glue_container(
-            job,
-            platform=platform,
-            job_args=entry.job_args,
-            extra_volumes=extra_volumes,
-            install_deps=install_deps,
-        )
-    return _run_pytest_in_glue_container(
+    container_command = _container_command_for_entry(
         job,
-        platform=platform,
-        pytest_args=entry.pytest_args,
-        extra_volumes=extra_volumes,
+        entry,
         install_deps=install_deps,
     )
+
+    def execute(volumes: Sequence[tuple[Path, str]]) -> int:
+        return _run_glue_container_command(
+            job,
+            platform=platform,
+            container_command=container_command,
+            extra_volumes=volumes,
+            install_deps=install_deps,
+        )
+
+    if isinstance(entry, SparkContainerEntry):
+        wrapper = files("aws_glue_toolkit").joinpath("run_wrapper.py")
+        with as_file(wrapper) as wrapper_host:
+            return execute(
+                [
+                    *extra_volumes,
+                    (Path(wrapper_host), RUN_WRAPPER_MOUNT),
+                ],
+            )
+    return execute(extra_volumes)

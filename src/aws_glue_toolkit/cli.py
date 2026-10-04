@@ -295,8 +295,10 @@ def build(  # noqa: PLR0915  # pylint: disable=too-many-statements
 
 
 @app.command
-def run(  # pylint: disable=keyword-arg-before-vararg
+def run(
     job_dir: DirectoryPath = Path(),
+    /,
+    *job_args: Annotated[str, Parameter(allow_leading_hyphen=True)],
     platform: Annotated[
         Literal["native", "worker"],
         Parameter(
@@ -307,7 +309,6 @@ def run(  # pylint: disable=keyword-arg-before-vararg
             ),
         ),
     ] = "native",
-    *job_args: Annotated[str, Parameter(allow_leading_hyphen=True)],
 ) -> int:
     """Run the job in the official AWS Glue local Docker image.
 
@@ -326,8 +327,10 @@ def run(  # pylint: disable=keyword-arg-before-vararg
 
 
 @app.command(name="test")
-def pytest_command(  # pylint: disable=keyword-arg-before-vararg
+def pytest_command(
     job_dir: DirectoryPath = Path(),
+    /,
+    *pytest_args: Annotated[str, Parameter(allow_leading_hyphen=True)],
     platform: Annotated[
         Literal["native", "worker"],
         Parameter(
@@ -338,7 +341,6 @@ def pytest_command(  # pylint: disable=keyword-arg-before-vararg
             ),
         ),
     ] = "native",
-    *pytest_args: Annotated[str, Parameter(allow_leading_hyphen=True)],
 ) -> int:
     """Run pytest in the official AWS Glue local Docker image.
 
