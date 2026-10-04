@@ -22,18 +22,18 @@ inside the container.
 
 Note:
     ``# nosec B404`` — reviewed ``subprocess`` import; used only in
-    :func:`run_container`, :func:`run_container_capture`, and host
-    ``pip config list`` for the container pip.conf snapshot.
+    :func:`run_container`, :func:`run_container_capture`, and
+    :func:`host_pip_runner`.
 
 """
 
 from __future__ import annotations
 
-from ast import literal_eval
-from collections import defaultdict
+from configparser import ConfigParser
 from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib.resources import as_file, files
+from io import StringIO
 from pathlib import Path
 from shlex import join as shlex_join
 from shlex import quote as shlex_quote
@@ -42,6 +42,12 @@ from subprocess import CompletedProcess, run  # nosec B404
 from sys import executable
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
+
+from pip._internal.configuration import OVERRIDE_ORDER, Configuration
+from pip._internal.exceptions import (
+    ConfigurationError,
+    ConfigurationFileCouldNotBeLoaded,
+)
 
 from aws_glue_toolkit.mounts import (
     PIP_CONFIG_MOUNT,
@@ -292,59 +298,51 @@ def build_run_argv(  # noqa: PLR0913  # pylint: disable=too-many-arguments
 # --- Host pip config snapshot ---
 
 
-def _parse_pip_config_list(stdout: str) -> dict[str, dict[str, str]]:
-    """Parse ``pip config list`` output into section → key → value.
-
-    ``:env:`` keys overwrite onto ``[global]`` (last write wins). Host-local
-    option names in :data:`_PIP_CONFIG_SKIP_KEYS` are omitted.
-    """
-    settings: dict[str, dict[str, str]] = defaultdict(dict)
-    for raw_line in stdout.splitlines():
-        line = raw_line.strip()
-        if "=" not in line:
-            continue
-        left, _, right = line.partition("=")
-        section, _, key = left.replace(":env:.", "global.", 1).partition(".")
-        if key not in _PIP_CONFIG_SKIP_KEYS:
-            settings[section][key] = literal_eval(right)
-    return settings
+def _pip_conf_section_and_option(key: str) -> tuple[str, str] | None:
+    """Map a pip configuration key to INI section and option, or skip."""
+    normalized = key.replace(":env:.", "global.", 1)
+    section, _, option = normalized.partition(".")
+    if not option or option in _PIP_CONFIG_SKIP_KEYS:
+        return None
+    return section, option
 
 
-def _pip_settings_to_ini(settings: dict[str, dict[str, str]]) -> str:
-    """Render section → key → value settings as pip.conf INI text."""
-    if not settings:
-        return ""
-    parts: list[str] = []
-    for section in sorted(settings):
-        parts.append(f"[{section}]")
-        parts.extend(
-            f"{key} = {value}"
-            for key, value in sorted(settings[section].items())
-        )
-        parts.append("")
-    return "\n".join(parts)
-
-
-def _host_pip_config_ini() -> str:
-    """Return filtered INI text from the host's effective pip config."""
+def _merged_pip_configuration() -> dict[str, object]:
+    """Load host pip settings merged in pip override order."""
+    configuration = Configuration(isolated=False)
     try:
-        result = run(
-            [executable, "-m", "pip", "config", "list"],
-            check=False,
-            capture_output=True,
-            text=True,
-            shell=False,
-        )  # nosec B603
-    except OSError as exc:
+        configuration.load()
+    except (ConfigurationFileCouldNotBeLoaded, ConfigurationError) as exc:
         raise DockerError(str(exc)) from exc
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        raise DockerError(
-            f"pip config list failed: {detail}"
-            if detail
-            else "pip config list failed",
-        )
-    return _pip_settings_to_ini(_parse_pip_config_list(result.stdout))
+    return {
+        key: value
+        for variant in OVERRIDE_ORDER
+        for bucket in configuration.get_values_in_config(variant).values()
+        for key, value in bucket.items()
+    }
+
+
+def _write_pip_conf_ini(sections: dict[str, dict[str, str]]) -> str:
+    """Serialize section map to pip.conf INI text."""
+    if not sections:
+        return ""
+    parser = ConfigParser(interpolation=None)
+    parser.read_dict(sections)
+    buffer = StringIO()
+    parser.write(buffer, space_around_delimiters=True)
+    return buffer.getvalue()
+
+
+def _pip_conf_ini_from_merged(merged: dict[str, object]) -> str:
+    """Build pip.conf INI text from merged pip configuration keys."""
+    sections: dict[str, dict[str, str]] = {}
+    for key, value in merged.items():
+        parsed = _pip_conf_section_and_option(key)
+        if parsed is None:
+            continue
+        section, option = parsed
+        sections.setdefault(section, {})[option] = str(value)
+    return _write_pip_conf_ini(sections)
 
 
 @contextmanager
@@ -352,7 +350,7 @@ def _host_pip_config_bind() -> Iterator[
     tuple[tuple[Path, str], tuple[str, ...]]
 ]:
     """Yield a pip.conf volume mount and ``PIP_CONFIG_FILE`` env token."""
-    ini = _host_pip_config_ini()
+    ini = _pip_conf_ini_from_merged(_merged_pip_configuration())
     with TemporaryDirectory() as tmp:
         conf_path = Path(tmp) / "pip.conf"
         conf_path.write_text(ini, encoding="utf-8")
@@ -452,7 +450,7 @@ def run_pip_in_container(
 
     Raises:
         DockerError: ``docker`` is not on ``PATH``, could not be started,
-            or host ``pip config list`` failed.
+            or host pip configuration load failed.
 
     """
     resolved_mounts = [
