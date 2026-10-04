@@ -116,8 +116,8 @@ def run(
         job: Resolved job config from
             :func:`~aws_glue_toolkit.job.load_pyproject`.
         *job_args: Tokens forwarded to the job after ``--JOB_NAME``.
-        platform: ``"native"`` omits Docker ``--platform`` (host arch);
-            ``"worker"`` forces ``runtime.worker_docker_platform``.
+        platform: ``"native"`` uses the host multi-arch Glue image;
+            ``"worker"`` uses ``runtime.worker_docker_platform``.
 
     Returns:
         Container exit code.
@@ -171,8 +171,8 @@ def test(
         job: Resolved job config from
             :func:`~aws_glue_toolkit.job.load_pyproject`.
         *pytest_args: Tokens forwarded to ``pytest``.
-        platform: ``"native"`` omits Docker ``--platform`` (host arch);
-            ``"worker"`` forces ``runtime.worker_docker_platform``.
+        platform: ``"native"`` uses the host multi-arch Glue image;
+            ``"worker"`` uses ``runtime.worker_docker_platform``.
 
     Returns:
         Container exit code.

@@ -29,14 +29,14 @@ uv run pre-commit install
 
 Before changing code, read [docs/architecture.md](docs/architecture.md). The package follows a **functional core / imperative shell** split:
 
-- **Core** (`mounts.py`, `runtime.py`, `job.py`, `requirements.py`, `wheels.py`, `artifacts.py`) — pure domain logic; no CLI, Docker, or terminal I/O.
+- **Core** (`mounts.py`, `runtime.py`, `job.py`, `requirements.py`, `wheels.py`, `artifacts.py`) — domain logic (parsing, pins, wheels, zip layout).
 - **Shell** (`container.py`, `run_wrapper.py`, `workflows.py`, `cli.py`) — subprocess orchestration, use-case wiring, the `gtk run` spark-submit entry, and the `gtk` CLI.
 
 Put new business rules and transforms in core modules. Keep subprocess calls, exit-code mapping, and Rich output in the shell layer.
 
 ### Stable interface
 
-Only the **`gtk` command-line interface** is stability-guaranteed: command names, flags, and documented exit codes in [README.md](README.md#exit-codes). Python imports under `aws_glue_toolkit` are not semver-promised unless README says otherwise.
+The stable **`gtk` command-line interface** is defined in [README.md](README.md#stability) (commands, flags, exit codes).
 
 ## Making changes
 

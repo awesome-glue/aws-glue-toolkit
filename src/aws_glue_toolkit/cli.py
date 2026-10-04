@@ -6,7 +6,7 @@ Commands:
 - ``run`` / ``test`` — ``--platform native`` (default) or ``worker``
 
 ``build --mode`` chooses where pip runs: ``host`` (default) local pip for
-worker-oriented resolve and packaging (no Docker); ``container`` worker-arch
+worker-oriented resolve and packaging on the host; ``container`` worker-arch
 Glue build container (may need QEMU on ARM).
 ``run|test --platform`` chooses which Glue image arch to run: ``native``
 (default) matches your machine; ``worker`` matches Glue job workers
@@ -82,7 +82,7 @@ class GtkExitCode(IntEnum):
     DATAERR = 65  # pip or dependency failure (build, run, test)
     NOINPUT = 66  # cannot read pyproject.toml
     UNAVAILABLE = 69  # docker unavailable or launch failure
-    SOFTWARE = 70  # build: non-pip packaging failure (not pip)
+    SOFTWARE = 70  # build: zip or host packaging failure
     CONFIG = 78  # invalid or unsupported job config
 
 

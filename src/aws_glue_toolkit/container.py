@@ -505,8 +505,8 @@ def pip_runner(job: GlueJobProject) -> PipRunner:
 def host_pip_runner() -> PipRunner:
     """Return a host :class:`~aws_glue_toolkit.requirements.PipRunner`.
 
-    Runs ``python -m pip`` with the current interpreter. Volume mounts are
-    ignored; host paths in ``args`` are used as-is.
+    Runs ``python -m pip`` with the current interpreter. Host paths in ``args``
+    are used as-is.
     """
 
     def execute_pip(

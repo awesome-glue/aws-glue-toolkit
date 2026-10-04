@@ -1,8 +1,7 @@
 """AWS Glue Toolkit — simplify the AWS Glue development lifecycle.
 
-The stable interface is the ``gtk`` command-line interface (``build``, ``run``,
-``test``). Python module imports are not semver-promised unless README states
-otherwise.
+The stable interface is documented in the package README (``gtk`` commands,
+flags, and exit codes).
 
 Modules:
 

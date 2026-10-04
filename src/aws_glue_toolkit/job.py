@@ -5,7 +5,8 @@ Private Pydantic models mirror the file layout and validate input.
 Glue runtime metadata for ``tool.aws-glue-toolkit.glue_version``, and returns
 :class:`GlueJobProject` with defaults applied.
 
-Schema rules (unknown keys ignored):
+Loaded fields (``[project]`` and ``[tool.aws-glue-toolkit]``; other keys
+skipped):
 
 - ``project.name`` — required
 - ``project.version`` — optional; defaults to :data:`DEFAULT_PACKAGE_VERSION`
