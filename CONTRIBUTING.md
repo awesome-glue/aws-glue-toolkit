@@ -46,9 +46,9 @@ Put new business rules and transforms in core modules. Keep subprocess calls, ex
 
 When a change needs both pip and Docker for a user-facing workflow, wire it in **`workflows`** and pass a **`PipRunner`** into **`requirements`** helpers.
 
-### Stable interface
+## Stable interface
 
-The stable interface is the **`gtk` command-line interface**. See [README.md](README.md#stability) for commands, flags, and exit codes.
+The stable interface is the **`gtk` command-line interface**. The README documents [commands](README.md#commands), [build artifacts](README.md#build-artifacts), and [exit codes](README.md#exit-codes). Run `gtk COMMAND --help` for flags.
 
 ## Making changes
 
@@ -65,7 +65,7 @@ The stable interface is the **`gtk` command-line interface**. See [README.md](RE
    uv run pre-commit run --all-files
    ```
 
-3. If you changed user-facing behavior, update [README.md](README.md).
+3. If you changed user-facing behavior, update [README.md](README.md). For advanced or niche behavior that does not belong in the README, describe it in the commit message or pull request body.
 4. Open a pull request with a small, focused diff.
 
 ## Commit messages

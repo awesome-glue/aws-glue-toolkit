@@ -1,7 +1,7 @@
 """AWS Glue Toolkit — simplify the AWS Glue development lifecycle.
 
-The stable interface is documented in the package README (``gtk`` commands,
-flags, and exit codes).
+The stable ``gtk`` command-line interface is documented in the package README
+(commands, flags, and exit codes).
 
 Modules:
 
@@ -21,7 +21,8 @@ Modules:
 - :mod:`aws_glue_toolkit.runtime` — bundled per-version Glue runtime pins
 
 Core modules hold domain logic; shell modules run Docker, workflows, and the
-``gtk`` command-line interface. See ``CONTRIBUTING.md`` for the module list.
+``gtk`` command-line interface. See ``CONTRIBUTING.md#architecture`` for layer
+layout.
 
 Import submodules directly for library APIs (for example
 ``from aws_glue_toolkit.job import load_pyproject``).
