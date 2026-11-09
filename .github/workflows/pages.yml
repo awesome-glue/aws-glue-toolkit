@@ -5,8 +5,7 @@ name: Deploy docs to GitHub Pages
 on:
   push:
     branches:
-      # TODO: Switch to `main` once ready for production release.
-      - develop
+      - main
   workflow_dispatch:
 
 permissions:
@@ -40,7 +39,7 @@ jobs:
         uses: actions/configure-pages@v6
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
